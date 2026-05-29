@@ -1,0 +1,33 @@
+name: pole_price
+description: "A new Flutter project."
+
+publish_to: 'none' 
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  supabase_flutter: ^2.12.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  # Autenticação Azure AD
+  aad_oauth: ^1.0.0 # Ou outro pacote de sua preferência baseado em OAuth2/MSAL
+  
+  # Gerenciamento de estado (opcional, mas recomendado para o login/preços)
+  provider: ^6.1.2
+
+  flutter_lints: ^6.0.0
+
+flutter:
+
+  uses-material-design: true
+
