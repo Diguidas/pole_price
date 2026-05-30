@@ -3,6 +3,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pole_price/screens/login_page.dart';
 import 'package:pole_price/screens/preco_screen.dart';
 import 'package:pole_price/screens/definir_aprovacoes_screen.dart';
+import 'package:pole_price/screens/grupos_screen.dart';
+import 'package:pole_price/screens/politicas_screen.dart';
+import 'package:pole_price/screens/historico_screen.dart';
 import 'package:pole_price/widgets/sidebar.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -16,11 +19,25 @@ class _HomeScreenState extends State<HomeScreen> {
   final _supabase = Supabase.instance.client;
 
   bool _loading = true;
-
   int _totalPendentes = 0;
   int _totalAprovados = 0;
   int _totalRejeitados = 0;
   List<Map<String, dynamic>> _ultimosPendentes = [];
+
+  // Dados do usuário logado via Azure/Supabase
+  String get _userEmail =>
+      _supabase.auth.currentUser?.email ?? '';
+  String get _userName =>
+      _supabase.auth.currentUser?.userMetadata?['full_name'] as String? ??
+      _supabase.auth.currentUser?.userMetadata?['name'] as String? ??
+      _userEmail.split('@').first;
+  String get _userInitials {
+    final parts = _userName.trim().split(' ');
+    if (parts.length >= 2) {
+      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+    }
+    return _userName.isNotEmpty ? _userName[0].toUpperCase() : '?';
+  }
 
   @override
   void initState() {
@@ -31,33 +48,35 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _carregarDados() async {
     setState(() => _loading = true);
     try {
-      // Busca todos os drafts com nome da lista mãe
       final res = await _supabase
           .from('price_drafts')
-          .select(
-            'id, status, created_at, price_lists!master_list_id(description)',
-          )
+          .select('id, status, created_at, created_by_email, price_lists!master_list_id(description)')
           .order('created_at', ascending: false);
 
       final todos = res as List;
-
-      final pendentes =
-          todos.where((d) => d['status'] == 'pending').toList();
-      final aprovados =
-          todos.where((d) => d['status'] == 'approved').toList();
-      final rejeitados =
-          todos.where((d) => d['status'] == 'rejected').toList();
+      final pendentes = todos.where((d) => d['status'] == 'pending').toList();
+      final aprovados = todos.where((d) => d['status'] == 'approved').toList();
+      final rejeitados = todos.where((d) => d['status'] == 'rejected').toList();
 
       setState(() {
         _totalPendentes = pendentes.length;
         _totalAprovados = aprovados.length;
         _totalRejeitados = rejeitados.length;
-        // Últimos 5 pendentes para o feed
         _ultimosPendentes = pendentes.take(5).cast<Map<String, dynamic>>().toList();
         _loading = false;
       });
     } catch (e) {
       setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _sair() async {
+    await _supabase.auth.signOut();
+    if (mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const LoginPage()),
+      );
     }
   }
 
@@ -70,7 +89,6 @@ class _HomeScreenState extends State<HomeScreen> {
       body: Row(
         children: [
           const Sidebar(paginaAtiva: 'home'),
-
           Expanded(
             child: Column(
               children: [
@@ -80,21 +98,18 @@ class _HomeScreenState extends State<HomeScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 24),
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    border: Border(
-                        bottom: BorderSide(color: Colors.grey.shade100)),
+                    border: Border(bottom: BorderSide(color: Colors.grey.shade100)),
                   ),
                   child: Row(
                     children: [
                       const Text(
                         'Dashboard',
-                        style: TextStyle(
-                            fontSize: 20, fontWeight: FontWeight.bold),
+                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                       ),
                       const Spacer(),
-                      // usuário simulado
+                      // Avatar + nome do usuário logado
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
                           color: Colors.grey.shade100,
                           borderRadius: BorderRadius.circular(20),
@@ -104,27 +119,45 @@ class _HomeScreenState extends State<HomeScreen> {
                             CircleAvatar(
                               radius: 14,
                               backgroundColor: laranja.withOpacity(0.15),
-                              child: const Icon(Icons.person,
-                                  size: 16, color: laranja),
+                              child: Text(
+                                _userInitials,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: laranja,
+                                ),
+                              ),
                             ),
                             const SizedBox(width: 8),
-                            const Text(
-                              'usuario@empresa.com',
-                              style: TextStyle(fontSize: 13),
+                            Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _userName,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                if (_userEmail.isNotEmpty)
+                                  Text(
+                                    _userEmail,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey.shade500,
+                                    ),
+                                  ),
+                              ],
                             ),
                           ],
                         ),
                       ),
                       const SizedBox(width: 8),
                       IconButton(
-                        icon: const Icon(Icons.logout_outlined,
-                            color: Colors.grey),
+                        icon: const Icon(Icons.logout_outlined, color: Colors.grey),
                         tooltip: 'Sair',
-                        onPressed: () => Navigator.pushReplacement(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => const LoginPage()),
-                        ),
+                        onPressed: _sair,
                       ),
                     ],
                   ),
@@ -141,19 +174,20 @@ class _HomeScreenState extends State<HomeScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                // Saudação
-                                const Text(
-                                  'Bem-vindo de volta 👋',
-                                  style: TextStyle(
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.bold),
+                                Text(
+                                  'Bem-vindo de volta, $_userName 👋',
+                                  style: const TextStyle(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
                                   'Aqui está o resumo de hoje.',
                                   style: TextStyle(
-                                      color: Colors.grey.shade600,
-                                      fontSize: 14),
+                                    color: Colors.grey.shade600,
+                                    fontSize: 14,
+                                  ),
                                 ),
                                 const SizedBox(height: 24),
 
@@ -164,7 +198,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                       label: 'Pendentes',
                                       valor: _totalPendentes,
                                       icon: Icons.hourglass_top_rounded,
-                                      cor: const Color(0xFFFF6B00),
+                                      cor: laranja,
                                     ),
                                     const SizedBox(width: 16),
                                     _metricCard(
@@ -183,9 +217,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     const SizedBox(width: 16),
                                     _metricCard(
                                       label: 'Total de drafts',
-                                      valor: _totalPendentes +
-                                          _totalAprovados +
-                                          _totalRejeitados,
+                                      valor: _totalPendentes + _totalAprovados + _totalRejeitados,
                                       icon: Icons.description_outlined,
                                       cor: const Color(0xFF6366F1),
                                     ),
@@ -193,25 +225,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
 
                                 const SizedBox(height: 28),
-
-                                // ── Linha: feed + atalhos ──────────────
-                                Row(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    // Feed de pendentes
-                                    Expanded(
-                                      flex: 3,
-                                      child: _feedPendentes(),
-                                    ),
-                                    const SizedBox(width: 16),
-                                    // Atalhos de módulos
-                                    Expanded(
-                                      flex: 2,
-                                      child: _atalhos(),
-                                    ),
-                                  ],
-                                ),
+                                _feedEAtalhos(),
                               ],
                             ),
                           ),
@@ -225,7 +239,24 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ── Metric card ────────────────────────────────────────────────────────
+  Widget _feedEAtalhos() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final totalWidth = constraints.maxWidth;
+        final feedWidth = (totalWidth - 16) * 3 / 5;
+        final atalhoWidth = (totalWidth - 16) * 2 / 5;
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(width: feedWidth, child: _feedPendentes()),
+            const SizedBox(width: 16),
+            SizedBox(width: atalhoWidth, child: _atalhos()),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _metricCard({
     required String label,
     required int valor,
@@ -258,14 +289,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 Text(
                   '$valor',
                   style: TextStyle(
-                      fontSize: 26,
-                      fontWeight: FontWeight.bold,
-                      color: cor),
+                    fontSize: 26,
+                    fontWeight: FontWeight.bold,
+                    color: cor,
+                  ),
                 ),
                 Text(
                   label,
-                  style: TextStyle(
-                      fontSize: 12, color: Colors.grey.shade500),
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
                 ),
               ],
             ),
@@ -275,26 +306,23 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ── Feed de pendentes ──────────────────────────────────────────────────
   Widget _feedPendentes() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
+    return Material(
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade100),
+        side: BorderSide(color: Colors.grey.shade100),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
             child: Row(
               children: [
                 const Text(
                   'Rascunhos Pendentes',
-                  style: TextStyle(
-                      fontSize: 15, fontWeight: FontWeight.bold),
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                 ),
                 const Spacer(),
                 TextButton.icon(
@@ -305,8 +333,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   onPressed: () => Navigator.push(
                     context,
-                    MaterialPageRoute(
-                        builder: (_) => const AprovacoesScreen()),
+                    MaterialPageRoute(builder: (_) => const AprovacoesScreen()),
                   ),
                 ),
               ],
@@ -317,8 +344,10 @@ class _HomeScreenState extends State<HomeScreen> {
             const Padding(
               padding: EdgeInsets.all(32),
               child: Center(
-                child: Text('Nenhum rascunho pendente no momento.',
-                    style: TextStyle(color: Colors.grey)),
+                child: Text(
+                  'Nenhum rascunho pendente no momento.',
+                  style: TextStyle(color: Colors.grey),
+                ),
               ),
             )
           else
@@ -330,16 +359,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   const Divider(height: 1, indent: 20, endIndent: 20),
               itemBuilder: (context, i) {
                 final d = _ultimosPendentes[i];
-                final priceList =
-                    d['price_lists'] as Map<String, dynamic>?;
-                final nome =
-                    priceList?['description'] ?? 'Tabela desconhecida';
-                final idCurto =
-                    (d['id'] as String).substring(0, 8);
+                final priceList = d['price_lists'] as Map<String, dynamic>?;
+                final nome = priceList?['description'] ?? 'Tabela desconhecida';
+                final idCurto = (d['id'] as String).substring(0, 8);
                 final criadoEm = d['created_at'] as String? ?? '';
                 final dataFormatada = criadoEm.length >= 10
                     ? criadoEm.substring(0, 10).split('-').reversed.join('/')
                     : criadoEm;
+                final criador = d['created_by_email'] as String? ?? '';
 
                 return ListTile(
                   contentPadding:
@@ -357,12 +384,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   title: Text(nome,
                       style: const TextStyle(
                           fontWeight: FontWeight.w600, fontSize: 14)),
-                  subtitle: Text('ID: $idCurto...  •  $dataFormatada',
-                      style: TextStyle(
-                          fontSize: 12, color: Colors.grey.shade500)),
+                  subtitle: Text(
+                    '${criador.isNotEmpty ? criador : 'ID: $idCurto...'}  •  $dataFormatada',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                  ),
                   trailing: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       color: const Color(0xFFFF6B00).withOpacity(0.10),
                       borderRadius: BorderRadius.circular(20),
@@ -370,15 +397,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: const Text(
                       'Pendente',
                       style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFFFF6B00)),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFFFF6B00),
+                      ),
                     ),
                   ),
                   onTap: () => Navigator.push(
                     context,
-                    MaterialPageRoute(
-                        builder: (_) => const AprovacoesScreen()),
+                    MaterialPageRoute(builder: (_) => const AprovacoesScreen()),
                   ),
                 );
               },
@@ -388,51 +415,50 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ── Atalhos de módulos ─────────────────────────────────────────────────
   Widget _atalhos() {
     final modulos = [
       {
         'titulo': 'Gestão de Preços',
         'subtitulo': 'Editar tabelas e enviar para aprovação',
         'icon': Icons.attach_money_rounded,
-        'onTap': () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const PrecoScreen()),
-            ),
+        'onTap': () => Navigator.push(context,
+            MaterialPageRoute(builder: (_) => const PrecoScreen())),
       },
       {
         'titulo': 'Aprovações',
         'subtitulo': 'Revisar e aprovar rascunhos pendentes',
         'icon': Icons.check_circle_outline_rounded,
-        'onTap': () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const AprovacoesScreen()),
-            ),
+        'onTap': () => Navigator.push(context,
+            MaterialPageRoute(builder: (_) => const AprovacoesScreen())),
       },
       {
-        'titulo': 'Relatórios',
-        'subtitulo': 'Visualizar histórico e resultados',
-        'icon': Icons.bar_chart_rounded,
-        'onTap': () => ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Em breve: Relatórios')),
-            ),
-      },
-      {
-        'titulo': 'Grupo de Materiais',
+        'titulo': 'Grupos de Materiais',
         'subtitulo': 'Gerenciar agrupamentos de produtos',
-        'icon': Icons.layers_outlined,
-        'onTap': () => ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                  content: Text('Em breve: Grupo de Materiais')),
-            ),
+        'icon': Icons.account_tree_outlined,
+        'onTap': () => Navigator.push(context,
+            MaterialPageRoute(builder: (_) => const GruposScreen())),
+      },
+      {
+        'titulo': 'Políticas de Preço',
+        'subtitulo': 'Cadastrar e gerenciar políticas',
+        'icon': Icons.policy_outlined,
+        'onTap': () => Navigator.push(context,
+            MaterialPageRoute(builder: (_) => const PoliticasScreen())),
+      },
+      {
+        'titulo': 'Histórico',
+        'subtitulo': 'Ver log de aprovações e criações',
+        'icon': Icons.history_rounded,
+        'onTap': () => Navigator.push(context,
+            MaterialPageRoute(builder: (_) => const HistoricoScreen())),
       },
     ];
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
+    return Material(
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade100),
+        side: BorderSide(color: Colors.grey.shade100),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

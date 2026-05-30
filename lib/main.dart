@@ -23,6 +23,7 @@ class SistemaPrecoApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
+        fontFamily: 'Poppins',
         primaryColor: const Color(0xFFFF6B00), // Laranja Principal
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFFFF6B00),

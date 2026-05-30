@@ -57,12 +57,12 @@ class TabelaPrecos extends StatelessWidget {
   }
 
   Widget _legenda(List<MaterialPreco> lista) {
-    int ok = 0, atencao = 0, critico = 0, semCpv = 0;
+    int ok = 0, atencao = 0, sem_margem = 0, semCpv = 0;
     for (final m in lista) {
       switch (m.statusMargem) {
         case 'ok': ok++; break;
         case 'atencao': atencao++; break;
-        case 'critico': critico++; break;
+        case 'sem margem': sem_margem++; break;
         default: semCpv++;
       }
     }
@@ -80,9 +80,9 @@ class TabelaPrecos extends StatelessWidget {
             const SizedBox(width: 14),
             _legendaItem(Colors.orange, '$atencao atenção'),
           ],
-          if (critico > 0) ...[
+          if (sem_margem > 0) ...[
             const SizedBox(width: 14),
-            _legendaItem(Colors.red, '$critico crítico'),
+            _legendaItem(Colors.red, '$sem_margem sem margem'),
           ],
           if (semCpv > 0) ...[
             const SizedBox(width: 14),
@@ -318,10 +318,10 @@ class _ItemMaterialState extends State<_ItemMaterial> {
         return m.margemFlat != null
             ? 'mín ${(m.margemFlat! * 100).toStringAsFixed(0)}%'
             : 'atenção';
-      case 'critico':
+      case 'sem margem':
         return m.margemOferta != null
             ? 'mín ${(m.margemOferta! * 100).toStringAsFixed(0)}%'
-            : 'crítico';
+            : 'sem margem';
       default:
         return m.novoPreco > 0 ? 'variação' : 'sem CPV';
     }
@@ -331,7 +331,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
     switch (status) {
       case 'ok':      return Colors.green;
       case 'atencao': return Colors.orange;
-      case 'critico': return Colors.red;
+      case 'sem margem': return Colors.red;
       default:        return Colors.grey.shade400;
     }
   }
@@ -340,7 +340,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
     switch (status) {
       case 'ok':      return Icons.check_circle_outline;
       case 'atencao': return Icons.warning_amber_outlined;
-      case 'critico': return Icons.cancel_outlined;
+      case 'sem margem': return Icons.cancel_outlined;
       default:        return Icons.help_outline;
     }
   }

@@ -43,12 +43,12 @@ class MaterialPreco {
     return (preco - cpv!) / preco;
   }
 
-  /// 'ok' | 'atencao' | 'critico' | 'sem-cpv'
+  /// 'ok' | 'atencao' | 'sem margem' | 'sem-cpv'
   String get statusMargem {
     final m = margemReal;
     if (m == null) return 'sem-cpv';
     if (margemFlat != null && m >= margemFlat!) return 'ok';
     if (margemOferta != null && m >= margemOferta!) return 'atencao';
-    return 'critico';
+    return 'sem margem';
   }
 }
