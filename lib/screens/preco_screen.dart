@@ -1,8 +1,11 @@
+// preco_screen.dart
 import 'package:flutter/material.dart';
 import 'package:pole_price/controllers/preco_controller.dart';
 import 'package:pole_price/models/pricing_cluster_item.dart';
 import 'package:pole_price/models/regra_ajuste.dart';
 import 'package:pole_price/service/preco_service.dart';
+import 'package:pole_price/screens/definir_aprovacoes_screen.dart';
+import 'package:pole_price/widgets/resumo_aprovacao_sheet.dart';
 import 'package:pole_price/widgets/sidebar.dart';
 import 'package:pole_price/widgets/tabela_precos.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -27,7 +30,6 @@ class _PrecoScreenState extends State<PrecoScreen> {
     super.initState();
     final service = PriceService(Supabase.instance.client);
     controller = PrecoController(service);
-    // FIX 3: escuta o controller para reconstruir toda a tela (incluindo lista de regras)
     controller.addListener(() {
       if (mounted) setState(() {});
     });
@@ -42,6 +44,189 @@ class _PrecoScreenState extends State<PrecoScreen> {
   void dispose() {
     controller.dispose();
     super.dispose();
+  }
+
+  // ── MODAL SELETOR COM PESQUISA (LISTA MÃE) ──────────────────────────
+  void _abrirSeletorListaMae() {
+    String pesquisa = '';
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final filtradas = controller.listas.where((l) {
+              return l.description.toLowerCase().contains(pesquisa.toLowerCase()) || 
+                     l.id.toLowerCase().contains(pesquisa.toLowerCase());
+            }).toList();
+
+            return Dialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: Container(
+                width: 450,
+                height: 500,
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Selecionar Tabela de Preço', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 14),
+                    TextField(
+                      autofocus: true,
+                      decoration: InputDecoration(
+                        hintText: 'Pesquisar lista pelo nome ou ID...',
+                        prefixIcon: const Icon(Icons.search),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onChanged: (val) => setModalState(() => pesquisa = val),
+                    ),
+                    const SizedBox(height: 14),
+                    Expanded(
+                      child: filtradas.isEmpty 
+                        ? const Center(child: Text('Nenhuma lista encontrada.'))
+                        : ListView.builder(
+                            itemCount: filtradas.length,
+                            itemBuilder: (context, index) {
+                              final lista = filtradas[index];
+                              final isSelected = controller.selecionada?.id == lista.id;
+                              return ListTile(
+                                leading: Icon(Icons.table_chart_outlined, color: isSelected ? _laranja : Colors.grey),
+                                title: Text(lista.description, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
+                                subtitle: Text('ID: ${lista.id}', style: const TextStyle(fontSize: 11)),
+                                selected: isSelected,
+                                selectedTileColor: _laranja.withOpacity(0.05),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                onTap: () {
+                                  controller.selecionarLista(lista);
+                                  Navigator.pop(context);
+                                },
+                              );
+                            },
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ── MODAL SELETOR MÚLTIPLO COM CHECKBOX (LISTAS DESTINO) ────────────
+  void _abrirSeletorMultiploTargets() {
+    List<String> tempTargets = List.from(controller.targets);
+    String pesquisa = '';
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            // Permite selecionar qualquer lista que não seja a lista mãe ativa
+            final disponiveis = controller.listas.where((l) {
+              final matchFiltro = l.description.toLowerCase().contains(pesquisa.toLowerCase()) || l.id.toLowerCase().contains(pesquisa.toLowerCase());
+              return l.id != controller.selecionada?.id && matchFiltro;
+            }).toList();
+
+            return Dialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: Container(
+                width: 500,
+                height: 550,
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Vincular Listas Destino', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const Text('Selecione em lote as tabelas filhas que herdarão estes valores.', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    const SizedBox(height: 14),
+                    TextField(
+                      decoration: InputDecoration(
+                        hintText: 'Pesquisar tabelas...',
+                        prefixIcon: const Icon(Icons.search),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onChanged: (val) => setModalState(() => pesquisa = val),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        TextButton(
+                          onPressed: () {
+                            setModalState(() {
+                              for (var item in disponiveis) {
+                                if (!tempTargets.contains(item.id)) tempTargets.add(item.id);
+                              }
+                            });
+                          },
+                          child: const Text('Selecionar todos filtrados'),
+                        ),
+                        TextButton(
+                          onPressed: () => setModalState(() => tempTargets.clear()),
+                          child: const Text('Limpar seleção'),
+                        ),
+                      ],
+                    ),
+                    const Divider(),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: disponiveis.length,
+                        itemBuilder: (context, index) {
+                          final lista = disponiveis[index];
+                          final marcado = tempTargets.contains(lista.id);
+
+                          return CheckboxListTile(
+                            activeColor: _laranja,
+                            title: Text(lista.description),
+                            subtitle: Text('ID: ${lista.id}', style: const TextStyle(fontSize: 11)),
+                            value: marcado,
+                            controlAffinity: ListTileControlAffinity.leading,
+                            onChanged: (bool? valor) {
+                              setModalState(() {
+                                if (valor == true) {
+                                  tempTargets.add(lista.id);
+                                } else {
+                                  tempTargets.remove(lista.id);
+                                }
+                              });
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('Cancelar', style: TextStyle(color: Colors.grey)),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(backgroundColor: _laranja, foregroundColor: Colors.white),
+                          onPressed: () {
+                            // Atualiza os alvos definitivos no controller em lote
+                            setState(() {
+                              controller.targets.clear();
+                              controller.targets.addAll(tempTargets);
+                            });
+                            Navigator.pop(context);
+                          },
+                          child: Text('Confirmar (${tempTargets.length} selecionadas)'),
+                        ),
+                      ],
+                    )
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   @override
@@ -82,19 +267,96 @@ class _PrecoScreenState extends State<PrecoScreen> {
 
   Widget _topBar() {
     return Container(
-      height: 64,
-      padding: const EdgeInsets.symmetric(horizontal: 24),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border(bottom: BorderSide(color: Colors.grey.shade100)),
       ),
       child: Row(
         children: [
-          const Text(
-            'Gestão de Preços',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Gestão de Preços',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              Text(
+                controller.selecionada != null
+                    ? 'Preço atual · Supabase (tabela materials)'
+                    : 'Selecione uma lista · dados do Supabase',
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+              ),
+            ],
           ),
           const Spacer(),
+          if (controller.selecionada != null)
+            IconButton(
+              icon: const Icon(Icons.refresh, size: 22),
+              tooltip: 'Recarregar preços do Supabase',
+              onPressed: controller.loading
+                  ? null
+                  : () async {
+                      await controller.recarregarMateriais();
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Preços recarregados do Supabase.'),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                    },
+            ),
+          OutlinedButton.icon(
+            icon: controller.syncingSap
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.sync, size: 18),
+            label: Text(
+              controller.syncingSap ? 'Sincronizando...' : 'Buscar do SAP',
+            ),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: _laranja,
+              side: const BorderSide(color: _laranja),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            onPressed: controller.syncingSap
+                ? null
+                : () async {
+                    try {
+                      final result = await controller.atualizarDoSap();
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              result.mensagem ??
+                                  '${result.materiaisAtualizados} material(is) atualizado(s) do SAP.',
+                            ),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Erro ao sincronizar SAP: $e'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    }
+                  },
+          ),
+          const SizedBox(width: 12),
           ElevatedButton.icon(
             icon: const Icon(Icons.check_circle_outline, size: 18),
             label: const Text('Salvar para aprovação'),
@@ -109,33 +371,32 @@ class _PrecoScreenState extends State<PrecoScreen> {
             onPressed: controller.selecionada == null
                 ? null
                 : () async {
-                    final confirm = await showDialog<bool>(
+                    final confirm = await showResumoDraft(
                       context: context,
-                      builder: (_) => AlertDialog(
-                        title: const Text('Confirmar'),
-                        content: const Text(
-                          'Deseja enviar este rascunho para aprovação?',
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(context, false),
-                            child: const Text('Cancelar'),
-                          ),
-                          ElevatedButton(
-                            onPressed: () => Navigator.pop(context, true),
-                            child: const Text('Salvar'),
-                          ),
-                        ],
-                      ),
+                      listasMae: controller.listas,
+                      selecionada: controller.selecionada!,
+                      materiais: controller.materiais,
+                      targets: controller.targets,
+                      regras: controller.regras,
                     );
                     if (confirm == true) {
                       try {
-                        await controller.salvar();
+                        final draftId = await controller.salvar();
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                              content: Text('Rascunho salvo com sucesso!'),
+                              content: Text(
+                                'Rascunho enviado! Abrindo tela de aprovações...',
+                              ),
                               backgroundColor: Colors.green,
+                            ),
+                          );
+                          await Navigator.push<void>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => AprovacoesScreen(
+                                draftIdInicial: draftId,
+                              ),
                             ),
                           );
                         }
@@ -188,35 +449,39 @@ class _PrecoScreenState extends State<PrecoScreen> {
                   ],
                 ),
                 const SizedBox(height: 14),
-                DropdownButtonFormField(
-                  value: controller.selecionada,
-                  decoration: InputDecoration(
-                    labelText: 'Tabela de Preço',
-                    prefixIcon: const Icon(
-                      Icons.table_chart_outlined,
-                      color: Color(0xFFFF6B00),
-                    ),
-                    filled: true,
-                    fillColor: Colors.white,
-                    border: OutlineInputBorder(
+                
+                // NOVO DESIGN MINI-TELA EM VEZ DE DROPDOWN COMMUM
+                InkWell(
+                  onTap: _abrirSeletorListaMae,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      border: Border.all(color: Colors.grey.shade300),
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: Colors.grey.shade300),
                     ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: Colors.grey.shade300),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.table_chart_outlined, color: _laranja),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            controller.selecionada != null 
+                              ? controller.selecionada!.description 
+                              : 'Clique para pesquisar e selecionar a lista...',
+                            style: TextStyle(
+                              color: controller.selecionada != null ? Colors.black87 : Colors.grey.shade600,
+                              fontSize: 14
+                            ),
+                          ),
+                        ),
+                        const Icon(Icons.arrow_drop_down, color: Colors.grey),
+                      ],
                     ),
                   ),
-                  items: controller.listas.map((l) {
-                    return DropdownMenuItem(
-                      value: l,
-                      child: Text(l.description),
-                    );
-                  }).toList(),
-                  onChanged: (val) {
-                    if (val != null) controller.selecionarLista(val);
-                  },
                 ),
+                
                 const SizedBox(height: 10),
                 TextField(
                   decoration: InputDecoration(
@@ -324,7 +589,7 @@ class _PrecoScreenState extends State<PrecoScreen> {
     );
   }
 
-  // ── SEÇÃO 2: Listas destino ──────────────────────────────────────────
+  // ── SEÇÃO 2: Listas destino (COM SELEÇÃO EM LOTE) ─────────────────────
 
   Widget _secaoListasDestino() {
     return Container(
@@ -343,13 +608,27 @@ class _PrecoScreenState extends State<PrecoScreen> {
               const SizedBox(width: 10),
               const Expanded(
                 child: Text(
-                  'Listas que receberão os preços da lista mãe',
+                  'Listas destino',
                   style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 14),
+
+          // BOTÃO PRINCIPAL PARA ABRIR O SELETOR EM LOTE / CHECKBOX
+          OutlinedButton.icon(
+            icon: const Icon(Icons.checklist_rtl_outlined, size: 18),
+            label: const Text('Selecionar listas em Lote'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: _laranja,
+              side: const BorderSide(color: _laranja),
+              minimumSize: const Size.fromHeight(45),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: controller.selecionada == null ? null : _abrirSeletorMultiploTargets,
+          ),
+          const SizedBox(height: 12),
 
           if (controller.targets.isNotEmpty) ...[
             Wrap(
@@ -398,54 +677,6 @@ class _PrecoScreenState extends State<PrecoScreen> {
               }).toList(),
             ),
             const SizedBox(height: 12),
-          ],
-
-          Row(
-            children: [
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  key: ValueKey(
-                    controller.targets.length,
-                  ), // força rebuild ao mudar targets
-                  decoration: InputDecoration(
-                    labelText: 'Selecionar listas de preço',
-                    prefixIcon: const Icon(Icons.add_circle_outline, size: 20),
-                    filled: true,
-                    fillColor: Colors.white,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: Colors.grey.shade300),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: Colors.grey.shade300),
-                    ),
-                  ),
-                  isExpanded: true,
-                  value: null,
-                  items: controller.listas
-                      .where(
-                        (l) =>
-                            l.id != controller.selecionada?.id &&
-                            !controller.targets.contains(l.id),
-                      )
-                      .map(
-                        (l) => DropdownMenuItem(
-                          value: l.id,
-                          child: Text(l.description),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (val) {
-                    if (val != null) controller.toggleTarget(val);
-                  },
-                ),
-              ),
-            ],
-          ),
-
-          if (controller.targets.isNotEmpty) ...[
-            const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -490,12 +721,10 @@ class _PrecoScreenState extends State<PrecoScreen> {
   final _valorController = TextEditingController();
 
   Widget _secaoExcecoes() {
-    // FIX 2: só mostra as listas que foram selecionadas como targets
     final listasParaExcecao = controller.listas
         .where((l) => controller.targets.contains(l.id))
         .toList();
 
-    // Se a lista selecionada para exceção não está mais nos targets, limpa
     if (_listaExcecaoSelecionada != null &&
         !controller.targets.contains(_listaExcecaoSelecionada)) {
       _listaExcecaoSelecionada = null;
@@ -568,7 +797,6 @@ class _PrecoScreenState extends State<PrecoScreen> {
                   borderSide: BorderSide(color: Colors.grey.shade300),
                 ),
               ),
-              // FIX 2: somente as listas que estão em targets
               items: listasParaExcecao.map((l) {
                 return DropdownMenuItem(
                   value: l.id,
@@ -735,7 +963,6 @@ class _PrecoScreenState extends State<PrecoScreen> {
                         borderSide: BorderSide(color: Colors.grey.shade300),
                       ),
                     ),
-                    // FIX 3: rebuild ao digitar para habilitar/desabilitar botão
                     onChanged: (_) => setState(() {}),
                   ),
                 ),
@@ -775,13 +1002,12 @@ class _PrecoScreenState extends State<PrecoScreen> {
                             tipo: _tipo,
                             valor: valor,
                             clusterId: _clusterSelecionado?.id,
-                            clusterNome: _clusterSelecionado?.name, // ← novo
+                            clusterNome: _clusterSelecionado?.name,
                             materialId: _nivel == 'Material'
                                 ? _materialSelecionado
                                 : null,
                             materialNome:
-                                _nivel ==
-                                    'Material' // ← novo
+                                _nivel == 'Material'
                                 ? controller.materiaisDoCluster
                                       .where(
                                         (m) => m.codigo == _materialSelecionado,
@@ -791,7 +1017,6 @@ class _PrecoScreenState extends State<PrecoScreen> {
                                 : null,
                           ),
                         );
-                        // FIX 3: limpa campos locais e força rebuild
                         setState(() {
                           _valorController.clear();
                           _listaExcecaoSelecionada = null;
@@ -805,8 +1030,6 @@ class _PrecoScreenState extends State<PrecoScreen> {
             ),
           ],
 
-          // FIX 3: lista de regras sempre renderizada (fora do else),
-          // reage ao controller via setState no addListener do initState
           if (controller.regras.isNotEmpty) ...[
             const SizedBox(height: 16),
             const Divider(),

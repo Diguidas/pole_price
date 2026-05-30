@@ -1,3 +1,4 @@
+// sidebar.dart
 import 'package:flutter/material.dart';
 import 'package:pole_price/screens/grupos_screen.dart';
 import 'package:pole_price/screens/home_screen.dart';
@@ -28,7 +29,7 @@ class _SidebarState extends State<Sidebar> with SingleTickerProviderStateMixin {
       color: Colors.white,
       child: Column(
         children: [
-          // Header com botão de toggle
+          // Header com botão de toggle e LOGO incorporada
           Container(
             height: 64,
             padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -41,16 +42,25 @@ class _SidebarState extends State<Sidebar> with SingleTickerProviderStateMixin {
                   : MainAxisAlignment.spaceBetween,
               children: [
                 if (!_recolhida)
-                  const Padding(
-                    padding: EdgeInsets.only(left: 8),
-                    child: Text(
-                      'POLE PRICE',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                        color: Color(0xFFFF6B00),
-                        letterSpacing: 1,
-                      ),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: Row(
+                      children: [
+                        // LOGO DA SIDEBAR (EXPANDIDA)
+                        Image.asset(
+                          'assets/images/logo_sidebar.png', // Caminho do seu asset
+                          height: 32,
+                          errorBuilder: (context, error, stackTrace) => const Text(
+                            'POLE PRICE',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: Color(0xFFFF6B00),
+                              letterSpacing: 1,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 IconButton(

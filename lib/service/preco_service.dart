@@ -2,12 +2,19 @@ import 'package:pole_price/models/material_preco.dart';
 import 'package:pole_price/models/pricelist_model.dart';
 import 'package:pole_price/models/pricing_cluster_item.dart';
 import 'package:pole_price/models/regra_ajuste.dart';
+import 'package:pole_price/service/draft_pricing_service.dart';
+import 'package:pole_price/service/sap_sync_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class PriceService {
   final SupabaseClient supabase;
+  late final DraftPricingService draftPricing;
+  late final SapSyncService sapSync;
 
-  PriceService(this.supabase);
+  PriceService(this.supabase) {
+    draftPricing = DraftPricingService(supabase);
+    sapSync = SapSyncService(supabase);
+  }
 
   Future<List<PriceList>> getLists() async {
     final res = await supabase
@@ -18,6 +25,8 @@ class PriceService {
     return (res as List).map((e) => PriceList.fromJson(e)).toList();
   }
 
+  /// Carrega materiais e preços **somente do Supabase** (`materials.price`).
+  /// Não chama SAP. Use [syncFromSap] apenas quando o usuário clicar em "Buscar do SAP".
   Future<List<MaterialPreco>> getMaterials(String listId) async {
     // 1. Busca as margens da política vinculada à lista
     final listRes = await supabase
@@ -26,8 +35,13 @@ class PriceService {
         .eq('id', listId)
         .single();
 
-    final margemFlat = (listRes['margem_flat'] as num?)?.toDouble();
-    final margemOferta = (listRes['margem_oferta'] as num?)?.toDouble();
+    final margemFlat = listRes['margem_flat'] != null
+        ? double.tryParse(listRes['margem_flat'].toString())
+        : null;
+
+    final margemOferta = listRes['margem_oferta'] != null
+        ? double.tryParse(listRes['margem_oferta'].toString())
+        : null;
 
     // 2. Busca o período mais recente disponível no product_costs
     final periodRes = await supabase
@@ -39,49 +53,43 @@ class PriceService {
 
     final latestPeriod = periodRes?['period'] as String?;
 
-    // 3. Busca os materiais da lista
+    // 3. Busca os materiais da lista — chave correta é product_id
     final matsRes = await supabase
         .from('materials')
-        .select()
+        .select('product_id, description, price')
         .eq('price_list_id', listId);
 
     final materiais = matsRes as List;
 
     if (materiais.isEmpty) return [];
 
-    // 4. Busca CPV em batch
-    Map<String, double> cpvMap = {};
-
-    if (latestPeriod != null) {
-      final codes = materiais
-          .map((m) => m['product_id']?.toString())
-          .whereType<String>()
-          .toList();
-
-      if (codes.isNotEmpty) {
-        final cpvRes = await supabase
-            .from('product_costs')
-            .select('product_code, cost_value')
-            .eq('period', latestPeriod)
-            .eq('classification', 'Real')
-            .inFilter('product_code', codes);
-
-        for (final row in cpvRes as List) {
-          final code = row['product_code']?.toString();
-          final cost = (row['cost_value'] as num?)?.toDouble();
-          if (code != null && cost != null) {
-            cpvMap[code] = cost;
-          }
-        }
-      }
-    }
-
-    // 5. Busca cluster_id dos produtos para permitir filtro por cluster
     final codes = materiais
         .map((m) => m['product_id']?.toString())
         .whereType<String>()
         .toList();
 
+    // 4. Busca CPV em batch (tabela product_costs -> coluna cost_value é numeric)
+    Map<String, double> cpvMap = {};
+    if (latestPeriod != null && codes.isNotEmpty) {
+      final cpvRes = await supabase
+          .from('product_costs')
+          .select('product_code, cost_value')
+          .eq('period', latestPeriod)
+          .eq('classification', 'Real')
+          .inFilter('product_code', codes);
+
+      for (final row in cpvRes as List) {
+        final code = row['product_code']?.toString();
+        final cost = row['cost_value'] != null
+            ? double.tryParse(row['cost_value'].toString())
+            : null;
+        if (code != null && cost != null) {
+          cpvMap[code] = cost;
+        }
+      }
+    }
+
+    // 5. Busca cluster_id dos produtos na tabela 'products' (onde a coluna é 'code')
     Map<String, String> clusterMap = {};
     if (codes.isNotEmpty) {
       final prodRes = await supabase
@@ -98,19 +106,58 @@ class PriceService {
       }
     }
 
-    // 6. Monta os MaterialPreco
+    // 6. Monta os objetos convertendo com segurança o numeric do Postgres
     return materiais.map((m) {
       final code = m['product_id']?.toString() ?? '';
+
+      // Garante que o numeric 'price' do banco mude para double sem crashar se vier como String
+      final double precoTratado = m['price'] != null
+          ? double.tryParse(m['price'].toString()) ?? 0.0
+          : 0.0;
+
       return MaterialPreco(
         codigo: code,
         description: m['description'] ?? '',
-        precoAtual: (m['price'] as num).toDouble(),
+        precoAtual: precoTratado,
         cpv: cpvMap[code],
         margemFlat: margemFlat,
         margemOferta: margemOferta,
-        clusterId: clusterMap[code],
+        clusterId:
+            clusterMap[code], // Vincula o cluster vindo da tabela de produtos
       );
     }).toList();
+  }
+
+  /// Atualiza os preços editados na tela de Preço de volta ao Supabase (tabela materials).
+  Future<void> updatePricesInSupabase({
+    required String listId,
+    required List<MaterialPreco> materiais,
+  }) async {
+    final alterados = materiais
+        .where((m) => m.novoPreco > 0 && m.novoPreco != m.precoAtual)
+        .toList();
+    if (alterados.isEmpty) return;
+
+    final rows = await supabase
+        .from('materials')
+        .select('id, product_id')
+        .eq('price_list_id', listId);
+
+    final idPorProduto = <String, String>{};
+    for (final row in rows as List) {
+      final pid = row['product_id']?.toString();
+      final id = row['id']?.toString();
+      if (pid != null && id != null) idPorProduto[pid] = id;
+    }
+
+    for (final m in alterados) {
+      final rowId = idPorProduto[m.codigo] ?? idPorProduto[m.codigo.trim()];
+      if (rowId == null) continue;
+      await supabase.from('materials').update({
+        'price': m.novoPreco,
+        'is_fixed': true,
+      }).eq('id', rowId);
+    }
   }
 
   /// Lista todos os clusters para o dropdown de Exceções
@@ -141,28 +188,29 @@ class PriceService {
     }).toList();
   }
 
-  Future<void> saveDraft({
+  Future<String> saveDraft({
     required String? masterListId,
     required List<MaterialPreco> materiais,
     required List<String> targets,
     required List<RegraAjuste> regras,
   }) async {
-    // FIX: adicionado 'status': 'pending' — sem ele o draft não aparece
-    // na tela de aprovações que filtra por .eq('status', 'pending')
     final draft = await supabase
         .from('price_drafts')
         .insert({'master_list_id': masterListId, 'status': 'pending'})
         .select()
         .single();
 
-    final draftId = draft['id'];
+    final draftId = draft['id']?.toString() ?? '';
+    if (draftId.isEmpty) {
+      throw Exception('Falha ao criar rascunho de aprovação.');
+    }
 
     final itens = materiais
-        .where((m) => m.novoPreco > 0)
+        .where((m) => m.novoPreco > 0 && m.novoPreco != m.precoAtual)
         .map(
           (m) => {
             'draft_id': draftId,
-            'product_id': m.codigo,
+            'product_id': m.codigo.trim(),
             'old_price': m.precoAtual,
             'new_price': m.novoPreco,
             'margin_pct': m.margemReal,
@@ -202,7 +250,19 @@ class PriceService {
     if (exc.isNotEmpty) {
       await supabase.from('price_draft_exceptions').insert(exc);
     }
+
+    return draftId;
   }
+
+  /// Aprova o draft: atualiza Supabase e envia ao SAP.
+  Future<void> approveDraft(String draftId) async {
+    await draftPricing.applyDraft(draftId);
+    await sapSync.pushToSap(draftId: draftId);
+  }
+
+  /// Puxa preços do SAP para o Supabase (botão manual na tela de preço).
+  Future<SapSyncResult> syncFromSap({String? listId}) =>
+      sapSync.syncFromSap(listId: listId);
 
   String _mapNivel(String n) {
     switch (n) {

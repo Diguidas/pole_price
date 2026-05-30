@@ -12,15 +12,14 @@ class DraftAprovacao {
   });
 
   factory DraftAprovacao.fromJson(Map<String, dynamic> json) {
-    // Como faremos um select com .select('*, price_lists(description)'),
-    // pegamos o nome da lista mãe de dentro do relacionamento
     final priceList = json['price_lists'] as Map<String, dynamic>?;
-    
+
     return DraftAprovacao(
-      id: json['id'] ?? '',
-      masterListName: priceList?['description'] ?? 'Tabela Desconhecida',
-      status: json['status'] ?? 'pending',
-      createdAt: json['created_at'] ?? '',
+      id: json['id']?.toString() ?? '',
+      masterListName:
+          priceList?['description']?.toString() ?? 'Tabela Desconhecida',
+      status: json['status']?.toString() ?? 'pending',
+      createdAt: json['created_at']?.toString() ?? '',
     );
   }
 }

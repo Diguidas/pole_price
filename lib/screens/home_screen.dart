@@ -34,7 +34,9 @@ class _HomeScreenState extends State<HomeScreen> {
       // Busca todos os drafts com nome da lista mãe
       final res = await _supabase
           .from('price_drafts')
-          .select('id, status, created_at, price_lists(description)')
+          .select(
+            'id, status, created_at, price_lists!master_list_id(description)',
+          )
           .order('created_at', ascending: false);
 
       final todos = res as List;

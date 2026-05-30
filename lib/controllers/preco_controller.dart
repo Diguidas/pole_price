@@ -4,6 +4,7 @@ import 'package:pole_price/models/pricelist_model.dart';
 import 'package:pole_price/models/pricing_cluster_item.dart';
 import 'package:pole_price/models/regra_ajuste.dart';
 import 'package:pole_price/service/preco_service.dart';
+import 'package:pole_price/service/sap_sync_service.dart';
 
 class PrecoController extends ChangeNotifier {
   final PriceService service;
@@ -20,6 +21,7 @@ class PrecoController extends ChangeNotifier {
   PriceList? selecionada;
 
   bool loading = false;
+  bool syncingSap = false;
 
   // ── Filtro por cluster (vindo de GruposScreen) ──────────────────────
   String? filtroClusterId;
@@ -80,10 +82,16 @@ class PrecoController extends ChangeNotifier {
 
   Future<void> selecionarLista(PriceList l) async {
     selecionada = l;
+    await recarregarMateriais();
+  }
+
+  /// Recarrega materiais da lista selecionada a partir do Supabase (nunca do SAP).
+  Future<void> recarregarMateriais() async {
+    if (selecionada == null) return;
     loading = true;
     notifyListeners();
 
-    materiais = await service.getMaterials(l.id);
+    materiais = await service.getMaterials(selecionada!.id);
     filtrados = List.from(materiais);
 
     loading = false;
@@ -103,13 +111,29 @@ class PrecoController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> salvar() async {
-    await service.saveDraft(
+  Future<String> salvar() async {
+    return service.saveDraft(
       masterListId: selecionada?.id,
       materiais: materiais,
       targets: targets,
       regras: regras,
     );
+  }
+
+  /// Puxa preços do SAP para o Supabase e recarrega a lista selecionada.
+  Future<SapSyncResult> atualizarDoSap() async {
+    syncingSap = true;
+    notifyListeners();
+    try {
+      final result = await service.syncFromSap(listId: selecionada?.id);
+      if (selecionada != null) {
+        await selecionarLista(selecionada!);
+      }
+      return result;
+    } finally {
+      syncingSap = false;
+      notifyListeners();
+    }
   }
 
   void toggleTarget(String id) {
