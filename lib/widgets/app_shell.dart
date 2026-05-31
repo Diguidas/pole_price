@@ -1,9 +1,4 @@
-// lib/widgets/app_shell.dart  (versão atualizada com permissões)
-//
-// Diferença da versão anterior:
-// - Sidebar filtra itens com base no PermissaoController
-// - AppPage.config adicionado para a tela de configurações (só admin)
-
+// lib/widgets/app_shell.dart
 import 'package:flutter/material.dart';
 import 'package:pole_price/controllers/permissao_controller.dart';
 import 'package:pole_price/screens/home_screen.dart';
@@ -37,17 +32,16 @@ enum AppPage {
       };
 
   IconData get icon => switch (this) {
-        AppPage.home => Icons.home_outlined,
-        AppPage.precos => Icons.attach_money,
-        AppPage.grupos => Icons.account_tree_outlined,
-        AppPage.aprovacoes => Icons.check_circle_outline,
+        AppPage.home => Icons.home_rounded,
+        AppPage.precos => Icons.attach_money_rounded,
+        AppPage.grupos => Icons.account_tree_rounded,
+        AppPage.aprovacoes => Icons.check_circle_rounded,
         AppPage.historico => Icons.history_rounded,
-        AppPage.politicas => Icons.policy_outlined,
+        AppPage.politicas => Icons.policy_rounded,
         AppPage.relatorio => Icons.bar_chart_rounded,
-        AppPage.config => Icons.settings_outlined,
+        AppPage.config => Icons.settings_rounded,
       };
 
-  /// Verifica se o usuário logado pode ver esta página.
   bool podeVer(PermissaoController p) => switch (this) {
         AppPage.home => true,
         AppPage.precos => p.podeVerPrecos,
@@ -60,9 +54,6 @@ enum AppPage {
       };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// InheritedWidget para acesso ao shell de qualquer descendente
-// ─────────────────────────────────────────────────────────────────────────────
 class _AppShellScope extends InheritedWidget {
   final _AppShellState state;
   const _AppShellScope({required this.state, required super.child});
@@ -71,9 +62,6 @@ class _AppShellScope extends InheritedWidget {
   bool updateShouldNotify(_AppShellScope old) => false;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// AppShell
-// ─────────────────────────────────────────────────────────────────────────────
 class AppShell extends StatefulWidget {
   final AppPage initialPage;
   const AppShell({super.key, this.initialPage = AppPage.home});
@@ -107,7 +95,7 @@ class _AppShellState extends State<AppShell> {
     return _AppShellScope(
       state: this,
       child: Scaffold(
-        backgroundColor: const Color(0xFFF8F9FA),
+        backgroundColor: const Color(0xFFF4F6F8),
         body: Row(
           children: [
             _AppSidebar(paginaAtiva: _paginaAtiva, onSelect: goTo),
@@ -133,9 +121,6 @@ class _AppShellState extends State<AppShell> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Sidebar com filtro de permissões
-// ─────────────────────────────────────────────────────────────────────────────
 class _AppSidebar extends StatefulWidget {
   final AppPage paginaAtiva;
   final void Function(AppPage) onSelect;
@@ -147,9 +132,12 @@ class _AppSidebar extends StatefulWidget {
 
 class _AppSidebarState extends State<_AppSidebar> {
   bool _recolhida = false;
-  static const _laranja = Color(0xFFFF6B00);
+  
+  static const _laranjaFundo = Color(0xFFFF6B00);
+  static const _brancoPuro = Colors.white;
+  static final _brancoOpaco = Colors.white.withOpacity(0.70);
+  static final _brancoHover = Colors.white.withOpacity(0.08);
 
-  // Páginas da seção principal (aparecem em ordem, filtradas por permissão)
   static const _mainPages = [
     AppPage.home,
     AppPage.precos,
@@ -163,16 +151,24 @@ class _AppSidebarState extends State<_AppSidebar> {
   @override
   Widget build(BuildContext context) {
     final permCtrl = PermissaoController.instance;
-    final double largura = _recolhida ? 64 : 220;
+    final double largura = _recolhida ? 72 : 240;
 
-    final paginasVisiveis =
-        _mainPages.where((p) => p.podeVer(permCtrl)).toList();
+    final paginasVisiveis = _mainPages.where((p) => p.podeVer(permCtrl)).toList();
 
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 220),
+      duration: const Duration(milliseconds: 260),
       curve: Curves.easeInOut,
       width: largura,
-      color: Colors.white,
+      decoration: const BoxDecoration(
+        color: _laranjaFundo,
+        boxShadow: [
+          BoxShadow(
+            color: Color(0x1A000000),
+            blurRadius: 16,
+            offset: Offset(4, 0),
+          )
+        ],
+      ),
       child: OverflowBox(
         maxWidth: largura,
         minWidth: largura,
@@ -182,84 +178,85 @@ class _AppSidebarState extends State<_AppSidebar> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Header ────────────────────────────────────────────────
+              // ── Header (Logo) ─────────────────────────────────────────
               SizedBox(
-                height: 64,
+                height: 80,
                 width: largura,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    border: Border(
-                        bottom: BorderSide(color: Colors.grey.shade100)),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: _recolhida
-                        ? Center(
-                            child: IconButton(
-                              icon: Icon(Icons.menu,
-                                  color: Colors.grey.shade600),
-                              onPressed: () =>
-                                  setState(() => _recolhida = false),
-                              tooltip: 'Expandir menu',
-                            ),
-                          )
-                        : Row(
-                            children: [
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Image.asset(
-                                  'assets/logo.png',
-                                  height: 32,
-                                  alignment: Alignment.centerLeft,
-                                  errorBuilder: (_, __, ___) => const Text(
-                                    'POLE PRICE',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 14,
-                                      color: _laranja,
-                                      letterSpacing: 1,
-                                    ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: _recolhida
+                      ? Center(
+                          child: IconButton(
+                            icon: const Icon(Icons.menu, color: _brancoPuro),
+                            onPressed: () => setState(() => _recolhida = false),
+                            tooltip: 'Expandir menu',
+                          ),
+                        )
+                      : Row(
+                          children: [
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Image.asset(
+                                'assets/logon.png',
+                                height: 50,
+                                alignment: Alignment.centerLeft,
+                                color: _brancoPuro, 
+                                errorBuilder: (_, __, ___) => const Text(
+                                  'Pole Price',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w800, // Força o bold geométrico da Poppins
+                                    fontSize: 16,
+                                    color: _brancoPuro,
+                                    letterSpacing: 1.2,
                                   ),
                                 ),
                               ),
-                              IconButton(
-                                icon: Icon(Icons.menu,
-                                    color: Colors.grey.shade600),
-                                onPressed: () =>
-                                    setState(() => _recolhida = true),
-                                tooltip: 'Recolher menu',
-                              ),
-                            ],
-                          ),
-                  ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.menu_open, color: _brancoPuro),
+                              onPressed: () => setState(() => _recolhida = true),
+                              tooltip: 'Recolher menu',
+                            ),
+                          ],
+                        ),
                 ),
               ),
 
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
 
-              // ── Itens principais ───────────────────────────────────────
-              ...paginasVisiveis.map((page) => _item(page)),
+              // ── Itens Principais do Menu ──────────────────────────────
+              Expanded(
+                child: ListView(
+                  padding: EdgeInsets.zero,
+                  physics: const ClampingScrollPhysics(),
+                  children: paginasVisiveis.map((page) => _item(page)).toList(),
+                ),
+              ),
 
-              const Spacer(),
-
-              // ── Config (admin) — fica no rodapé separado ──────────────
+              // ── Configurações (Fixo embaixo se for Admin) ──────────────
               if (AppPage.config.podeVer(permCtrl)) ...[
-                Divider(height: 1, color: Colors.grey.shade100),
-                const SizedBox(height: 4),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Divider(height: 1, color: Colors.white.withOpacity(0.15)),
+                ),
                 _item(AppPage.config),
-                const SizedBox(height: 4),
+                const SizedBox(height: 8),
               ],
 
+              // ── Rodapé com a versão ────────────────────────────────────
               if (!_recolhida)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 16, left: 16),
+                  padding: const EdgeInsets.only(bottom: 20, left: 24),
                   child: Text(
                     'Versão 1.0.0',
-                    style:
-                        TextStyle(fontSize: 11, color: Colors.grey.shade400),
+                    style: TextStyle(
+                      fontSize: 11, 
+                      fontWeight: FontWeight.w400, // Ajuste sutil para a Poppins pequena
+                      color: Colors.white.withOpacity(0.5),
+                    ),
                   ),
                 ),
-              if (_recolhida) const SizedBox(height: 16),
+              if (_recolhida) const SizedBox(height: 20),
             ],
           ),
         ),
@@ -269,47 +266,51 @@ class _AppSidebarState extends State<_AppSidebar> {
 
   Widget _item(AppPage page) {
     final ativo = widget.paginaAtiva == page;
+    
     return Tooltip(
       message: _recolhida ? page.label : '',
       preferBelow: false,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         child: Material(
-          color: ativo ? _laranja.withOpacity(0.12) : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
+          color: ativo ? _brancoPuro : Colors.transparent,
+          borderRadius: BorderRadius.circular(24),
+          elevation: ativo ? 2 : 0,
+          shadowColor: Colors.black.withOpacity(0.1),
           child: InkWell(
             onTap: () => widget.onSelect(page),
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(24),
+            hoverColor: _brancoHover,
+            splashColor: _brancoHover,
             child: SizedBox(
-              height: 42,
+              height: 48,
               child: Padding(
-                padding:
-                    EdgeInsets.symmetric(horizontal: _recolhida ? 0 : 12),
+                padding: EdgeInsets.symmetric(horizontal: _recolhida ? 0 : 16),
                 child: _recolhida
                     ? Center(
-                        child: Icon(page.icon,
-                            size: 22,
-                            color:
-                                ativo ? _laranja : Colors.grey.shade600),
+                        child: Icon(
+                          page.icon,
+                          size: 24,
+                          color: ativo ? _laranjaFundo : _brancoOpaco, 
+                        ),
                       )
                     : Row(
                         children: [
-                          Icon(page.icon,
-                              size: 20,
-                              color:
-                                  ativo ? _laranja : Colors.grey.shade600),
-                          const SizedBox(width: 12),
+                          Icon(
+                            page.icon,
+                            size: 22,
+                            color: ativo ? _laranjaFundo : _brancoOpaco,
+                          ),
+                          const SizedBox(width: 14),
                           Expanded(
                             child: Text(
                               page.label,
                               style: TextStyle(
                                 fontSize: 14,
-                                fontWeight: ativo
-                                    ? FontWeight.w600
-                                    : FontWeight.normal,
-                                color: ativo
-                                    ? _laranja
-                                    : Colors.grey.shade700,
+                                letterSpacing: 0.2,
+                                // Poppins SemiBold no item ativo e Medium no inativo para máxima legibilidade
+                                fontWeight: ativo ? FontWeight.w600 : FontWeight.w500,
+                                color: ativo ? _laranjaFundo : _brancoOpaco,
                               ),
                               overflow: TextOverflow.ellipsis,
                             ),

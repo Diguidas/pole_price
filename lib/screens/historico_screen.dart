@@ -11,7 +11,15 @@ class HistoricoScreen extends StatefulWidget {
 }
 
 class _HistoricoScreenState extends State<HistoricoScreen> {
+  // Paleta de Cores Premium unificada do ecossistema
   static const _laranja = Color(0xFFFF6B00);
+  static const _slate900 = Color(0xFF0F172A);
+  static const _slate600 = Color(0xFF475569);
+  static const _slate400 = Color(0xFF94A3B8);
+  static const _slate200 = Color(0xFFE2E8F0);
+  static const _slate100 = Color(0xFFF1F5F9);
+  static const _bgSuave = Color(0xFFF8FAFC);
+
   final _supabase = Supabase.instance.client;
 
   bool _loading = true;
@@ -75,12 +83,9 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
     }).toList();
   }
 
-  // ── Formatação de data ────────────────────────────────────────────────────
-  // O banco salva em UTC. Fazemos parse como UTC explícito e convertemos para local.
   String _fmtData(String? iso) {
     if (iso == null || iso.isEmpty) return '—';
     try {
-      // Garante interpretação como UTC mesmo que a string não tenha sufixo 'Z'
       final raw = DateTime.parse(iso);
       final dt = raw.isUtc
           ? raw.toLocal()
@@ -96,22 +101,20 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
       final mo = dt.month.toString().padLeft(2, '0');
       final h = dt.hour.toString().padLeft(2, '0');
       final mi = dt.minute.toString().padLeft(2, '0');
-      return '$d/$mo/${dt.year}  $h:$mi';
+      return '$d/$mo/${dt.year} $h:$mi';
     } catch (_) {
       return iso.length >= 10 ? iso.substring(0, 10) : iso;
     }
   }
 
-  // ── Status config ─────────────────────────────────────────────────────────
   (String label, Color bg, Color fg) _statusConfig(String status) {
     return switch (status) {
-      'approved' => ('Aprovado', Colors.green.shade50, Colors.green.shade700),
-      'rejected' => ('Rejeitado', Colors.red.shade50, Colors.red.shade700),
-      _ => ('Pendente', _laranja.withOpacity(0.10), _laranja),
+      'approved' => ('Aprovado', const Color(0xFFECFDF5), const Color(0xFF047857)),
+      'rejected' => ('Rejeitado', const Color(0xFFFFF1F2), const Color(0xFFB91C1C)),
+      _ => ('Pendente', const Color(0xFFFFF7ED), const Color(0xFFC2410C)),
     };
   }
 
-  // ── Navega para detalhe do draft ──────────────────────────────────────────
   void _abrirDetalhe(Map<String, dynamic> r) {
     final priceList = r['price_lists'] as Map<String, dynamic>?;
     final nomeLista = priceList?['description']?.toString() ?? '—';
@@ -136,42 +139,16 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
     );
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F6F8),
+      backgroundColor: _bgSuave,
       body: Column(
         children: [
-          // Topbar
-          Container(
-            height: 64,
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border(bottom: BorderSide(color: Colors.grey.shade100)),
-            ),
-            child: Row(
-              children: [
-                const Text(
-                  'Histórico',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.refresh_rounded),
-                  tooltip: 'Atualizar',
-                  onPressed: _carregar,
-                  color: Colors.grey.shade600,
-                ),
-              ],
-            ),
-          ),
-
-          // Corpo
+          _topBarPremium(),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? const Center(child: CircularProgressIndicator(color: _laranja))
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -185,29 +162,57 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
     );
   }
 
-  // ── Barra de filtros ──────────────────────────────────────────────────────
+  Widget _topBarPremium() {
+    return Container(
+      height: 80,
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        boxShadow: [BoxShadow(color: Color(0x02000000), blurRadius: 15, offset: Offset(0, 4))],
+        border: Border(bottom: BorderSide(color: _slate100)),
+      ),
+      child: Row(
+        children: [
+          const Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Histórico de Alterações',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: _slate900, letterSpacing: -0.5),
+              ),
+              Text(
+                'Auditoria completa de rascunhos, submissões e decisões comerciais anteriores',
+                style: TextStyle(fontSize: 12, color: _slate600, fontWeight: FontWeight.w500),
+              )
+            ],
+          ),
+          const Spacer(),
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded, size: 22),
+            tooltip: 'Atualizar Histórico',
+            onPressed: _carregar,
+            color: _slate600,
+            style: IconButton.styleFrom(
+              hoverColor: _slate100,
+              padding: const EdgeInsets.all(10),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _barraFiltros() {
     final tabs = [
       ('todos', 'Todos', _registros.length),
-      (
-        'pending',
-        'Pendentes',
-        _registros.where((r) => r['status'] == 'pending').length,
-      ),
-      (
-        'approved',
-        'Aprovados',
-        _registros.where((r) => r['status'] == 'approved').length,
-      ),
-      (
-        'rejected',
-        'Rejeitados',
-        _registros.where((r) => r['status'] == 'rejected').length,
-      ),
+      ('pending', 'Pendentes', _registros.where((r) => r['status'] == 'pending').length),
+      ('approved', 'Aprovados', _registros.where((r) => r['status'] == 'approved').length),
+      ('rejected', 'Rejeitados', _registros.where((r) => r['status'] == 'rejected').length),
     ];
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
       color: Colors.white,
       child: Row(
         children: [
@@ -219,47 +224,46 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
                 label: Text('${t.$2} (${t.$3})'),
                 selected: active,
                 onSelected: (_) => setState(() => _filtroStatus = t.$1),
-                selectedColor: _laranja.withOpacity(0.12),
+                selectedColor: _laranja.withOpacity(0.08),
                 checkmarkColor: _laranja,
                 showCheckmark: false,
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                 labelStyle: TextStyle(
                   fontSize: 12,
-                  fontWeight: active ? FontWeight.w600 : FontWeight.normal,
-                  color: active ? _laranja : Colors.grey.shade700,
+                  fontWeight: active ? FontWeight.w700 : FontWeight.w600,
+                  color: active ? _laranja : _slate600,
                 ),
                 side: BorderSide(
-                  color: active
-                      ? _laranja.withOpacity(0.4)
-                      : Colors.grey.shade300,
+                  color: active ? _laranja.withOpacity(0.5) : _slate200,
+                  width: active ? 1.5 : 1,
                 ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
             );
           }),
           const Spacer(),
           SizedBox(
-            width: 280,
-            height: 38,
+            width: 320,
+            height: 40,
             child: TextField(
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
               decoration: InputDecoration(
-                hintText: 'Buscar tabela, criador ou aprovador...',
-                hintStyle: TextStyle(fontSize: 12, color: Colors.grey.shade400),
-                prefixIcon: Icon(
-                  Icons.search,
-                  size: 18,
-                  color: Colors.grey.shade400,
-                ),
+                hintText: 'Buscar tabela, criador ou auditor...',
+                hintStyle: const TextStyle(fontSize: 12, color: _slate400, fontWeight: FontWeight.w500),
+                prefixIcon: const Icon(Icons.search_rounded, size: 18, color: _slate600),
                 isDense: true,
+                filled: true,
+                fillColor: _bgSuave,
                 contentPadding: const EdgeInsets.symmetric(vertical: 0),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
                 enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: _slate200),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: _laranja, width: 1.5),
                 ),
               ),
-              style: const TextStyle(fontSize: 13),
               onChanged: (v) => setState(() => _busca = v),
             ),
           ),
@@ -268,7 +272,6 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
     );
   }
 
-  // ── Tabela ────────────────────────────────────────────────────────────────
   Widget _tabela() {
     final lista = _registrosFiltrados;
 
@@ -277,54 +280,57 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
       child: Container(
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey.shade200),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: _slate200),
+          boxShadow: const [BoxShadow(color: Color(0x01000000), blurRadius: 20, offset: Offset(0, 8))],
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(
           children: [
-            // Cabeçalho
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              color: Colors.grey.shade50,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+              color: _bgSuave,
               child: Row(
                 children: [
-                  _th('Tabela de preços', flex: 4),
+                  _th('Estrutura Comercial / Tabela', flex: 4),
                   _th('Status', flex: 2, align: TextAlign.center),
                   _th('Criado por', flex: 3),
-                  _th('Criado em', flex: 3),
-                  _th('Revisado por', flex: 3),
-                  _th('Revisado em', flex: 3),
-                  const SizedBox(width: 32), // espaço do ícone chevron
+                  _th('Solicitação em', flex: 3),
+                  _th('Auditado por', flex: 3),
+                  _th('Efetivado em', flex: 3),
+                  const SizedBox(width: 32),
                 ],
               ),
             ),
-            const Divider(height: 1),
-
-            // Linhas
+            const Divider(height: 1, color: _slate100),
             Expanded(
               child: lista.isEmpty
                   ? Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(
-                            Icons.history,
-                            size: 48,
-                            color: Colors.grey.shade300,
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: const BoxDecoration(color: _bgSuave, shape: BoxShape.circle),
+                            child: Icon(Icons.history_toggle_off_rounded, size: 40, color: _slate400),
                           ),
                           const SizedBox(height: 12),
-                          Text(
-                            'Nenhum registro encontrado.',
-                            style: TextStyle(color: Colors.grey.shade500),
+                          const Text(
+                            'Nenhum registro localizado.',
+                            style: TextStyle(color: _slate900, fontWeight: FontWeight.w700, fontSize: 15),
+                          ),
+                          const SizedBox(height: 4),
+                          const Text(
+                            'Refine ou altere os filtros superiores.',
+                            style: TextStyle(color: _slate600, fontSize: 12),
                           ),
                         ],
                       ),
                     )
                   : ListView.separated(
+                      padding: EdgeInsets.zero,
                       itemCount: lista.length,
-                      separatorBuilder: (_, __) =>
-                          Divider(height: 1, color: Colors.grey.shade100),
+                      separatorBuilder: (_, __) => const Divider(height: 1, color: _slate100),
                       itemBuilder: (_, i) => _linha(lista[i]),
                     ),
             ),
@@ -342,12 +348,11 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
 
     return InkWell(
       onTap: () => _abrirDetalhe(r),
-      hoverColor: _laranja.withOpacity(0.03),
+      hoverColor: _laranja.withOpacity(0.02),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
         child: Row(
           children: [
-            // Tabela
             Expanded(
               flex: 4,
               child: Row(
@@ -359,84 +364,55 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
                       color: _laranja.withOpacity(0.08),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(
-                      Icons.description_outlined,
-                      size: 16,
-                      color: _laranja,
-                    ),
+                    child: const Icon(Icons.description_outlined, size: 16, color: _laranja),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Text(
                       nomeLista,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                      ),
+                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: _slate900),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
               ),
             ),
-
-            // Status badge
             Expanded(
               flex: 2,
               child: Center(
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: bg,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
                   child: Text(
                     label,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: fg,
-                    ),
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: fg, letterSpacing: 0.2),
                   ),
                 ),
               ),
             ),
-
-            // Criado por
             Expanded(
               flex: 3,
               child: _emailCell(r['created_by_email']?.toString()),
             ),
-
-            // Criado em
             Expanded(
               flex: 3,
               child: Text(
                 _fmtData(r['created_at']?.toString()),
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                style: const TextStyle(fontSize: 12, color: _slate600, fontWeight: FontWeight.w500),
               ),
             ),
-
-            // Revisado por
             Expanded(
               flex: 3,
               child: _emailCell(r['reviewed_by_email']?.toString()),
             ),
-
-            // Revisado em
             Expanded(
               flex: 3,
               child: Text(
                 _fmtData(r['reviewed_at']?.toString()),
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                style: const TextStyle(fontSize: 12, color: _slate600, fontWeight: FontWeight.w500),
               ),
             ),
-
-            // Chevron
-            Icon(Icons.chevron_right, size: 18, color: Colors.grey.shade300),
+            const Icon(Icons.chevron_right_rounded, size: 20, color: _slate400),
           ],
         ),
       ),
@@ -445,31 +421,25 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
 
   Widget _emailCell(String? email) {
     if (email == null || email.isEmpty || email == 'desconhecido') {
-      return Text(
-        '—',
-        style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
-      );
+      return const Text('—', style: TextStyle(fontSize: 12, color: _slate400, fontWeight: FontWeight.w500));
     }
     final inicial = email[0].toUpperCase();
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
         CircleAvatar(
-          radius: 12,
-          backgroundColor: _laranja.withOpacity(0.12),
+          radius: 11,
+          backgroundColor: _laranja.withOpacity(0.08),
           child: Text(
             inicial,
-            style: const TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-              color: _laranja,
-            ),
+            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: _laranja),
           ),
         ),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
             email,
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+            style: const TextStyle(fontSize: 12, color: _slate600, fontWeight: FontWeight.w500),
             overflow: TextOverflow.ellipsis,
           ),
         ),
@@ -477,21 +447,13 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
     );
   }
 
-  Widget _th(
-    String label, {
-    required int flex,
-    TextAlign align = TextAlign.left,
-  }) {
+  Widget _th(String label, {required int flex, TextAlign align = TextAlign.left}) {
     return Expanded(
       flex: flex,
       child: Text(
         label,
         textAlign: align,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: Colors.grey.shade600,
-        ),
+        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: _slate600, letterSpacing: 0.3),
       ),
     );
   }

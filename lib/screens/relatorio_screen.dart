@@ -40,8 +40,14 @@ class _SerieHistorico {
       precoInicial > 0 ? (variacaoAbsoluta / precoInicial) * 100 : 0;
 }
 
+class _ListaPrecoRef {
+  final String id;
+  final String description;
+  _ListaPrecoRef({required this.id, required this.description});
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Tela principal
+// Tela Principal
 // ─────────────────────────────────────────────────────────────────────────────
 class RelatorioScreen extends StatefulWidget {
   const RelatorioScreen({super.key});
@@ -52,34 +58,25 @@ class RelatorioScreen extends StatefulWidget {
 
 class _RelatorioScreenState extends State<RelatorioScreen> {
   static const _laranja = Color(0xFFFF6B00);
+  static const _slate900 = Color(0xFF0F172A);
+  static const _slate600 = Color(0xFF475569);
+  static const _slate200 = Color(0xFFE2E8F0);
+  static const _slate100 = Color(0xFFF1F5F9);
+  static const _bgSuave = Color(0xFFF8FAFC);
+
   final _supabase = Supabase.instance.client;
 
-  // Listas disponíveis
   bool _loadingListas = true;
-  List<Map<String, dynamic>> _listas = [];
+  bool _loadingDados = false;
+
+  List<_ListaPrecoRef> _listas = [];
   String? _listaSelecionadaId;
-  String _listaSelecionadaNome = '';
 
-  // Histórico carregado
-  bool _loadingHistorico = false;
-  List<_SerieHistorico> _series = [];
-  DateTime? _dataMin;
-  DateTime? _dataMax;
+  List<_SerieHistorico> _todasSeries = [];
+  List<_SerieHistorico> _seriesFiltradas = [];
+  _SerieHistorico? _serieAtiva;
 
-  // Seleção de materiais para o gráfico
-  final Set<String> _materiaisSelecionados = {};
-  String _buscaMaterial = '';
-
-  // Agrupamento do gráfico: 'mes' ou 'dia'
-  String _agrupamento = 'mes';
-
-  // Tooltip do gráfico
-  _PontoHistorico? _tooltipPonto;
-  String? _tooltipProductId;
-  Offset _tooltipOffset = Offset.zero;
-
-  // Expansão das linhas da tabela de histórico
-  final Set<String> _materiaisExpandidos = {};
+  String _buscaProduto = '';
 
   @override
   void initState() {
@@ -97,22 +94,26 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
           .select('id, description')
           .order('description');
       setState(() {
-        _listas = (res as List).cast<Map<String, dynamic>>();
+        _listas = (res as List)
+            .map((row) => _ListaPrecoRef(
+                  id: row['id'] as String,
+                  description: row['description'] as String,
+                ))
+            .toList();
+        _loadingListas = false;
       });
     } catch (e) {
-      _snack('Erro ao carregar listas: $e');
-    } finally {
+      _snack('Erro ao carregar listas: $e', erro: true);
       setState(() => _loadingListas = false);
     }
   }
 
-  Future<void> _carregarHistorico(String listaId) async {
+  Future<void> _processarHistorico(String listaId) async {
     setState(() {
-      _loadingHistorico = true;
-      _series = [];
-      _materiaisSelecionados.clear();
-      _materiaisExpandidos.clear();
-      _tooltipPonto = null;
+      _loadingDados = true;
+      _todasSeries = [];
+      _seriesFiltradas = [];
+      _serieAtiva = null;
     });
 
     try {
@@ -127,7 +128,7 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
       final drafts = (draftsRes as List).cast<Map<String, dynamic>>();
 
       if (drafts.isEmpty) {
-        setState(() => _loadingHistorico = false);
+        setState(() => _loadingDados = false);
         return;
       }
 
@@ -136,12 +137,13 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
       for (final d in drafts) {
         final rawDate = d['reviewed_at']?.toString();
         if (rawDate == null || rawDate == 'null') continue;
-        datasPorDraft[d['id'].toString()] = DateTime.parse(rawDate).toLocal();
+        datasPorDraft[d['id'].toString()] =
+            DateTime.parse(rawDate).toLocal();
       }
 
       final draftIds = datasPorDraft.keys.toList();
       if (draftIds.isEmpty) {
-        setState(() => _loadingHistorico = false);
+        setState(() => _loadingDados = false);
         return;
       }
 
@@ -173,9 +175,7 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
         final data = datasPorDraft[draftId];
         if (data == null) continue;
 
-        porProduto
-            .putIfAbsent(pid, () => [])
-            .add(
+        porProduto.putIfAbsent(pid, () => []).add(
               _PontoHistorico(
                 data: data,
                 preco: preco,
@@ -186,127 +186,32 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
       }
 
       // 5. Ordena pontos por data e cria séries
-      final series = porProduto.entries.map((e) {
+      final listSeries = porProduto.entries.map((e) {
         final pts = e.value..sort((a, b) => a.data.compareTo(b.data));
         return _SerieHistorico(
           productId: e.key,
           description: descricoes[e.key] ?? e.key,
           pontos: pts,
         );
-      }).toList()..sort((a, b) => a.description.compareTo(b.description));
-
-      // Calcula range de datas global
-      DateTime? dMin, dMax;
-      for (final s in series) {
-        for (final p in s.pontos) {
-          if (dMin == null || p.data.isBefore(dMin)) dMin = p.data;
-          if (dMax == null || p.data.isAfter(dMax)) dMax = p.data;
-        }
-      }
+      }).toList()
+        ..sort(
+            (a, b) => b.variacaoPct.abs().compareTo(a.variacaoPct.abs()));
 
       setState(() {
-        _series = series;
-        _dataMin = dMin;
-        _dataMax = dMax;
-        // Seleciona até 5 materiais com mais mudanças por padrão
-        final ordenados = [...series]
-          ..sort((a, b) => b.pontos.length.compareTo(a.pontos.length));
-        for (final s in ordenados.take(5)) {
-          _materiaisSelecionados.add(s.productId);
+        _todasSeries = listSeries;
+        _filtrarLocal(busca: _buscaProduto);
+        if (_seriesFiltradas.isNotEmpty) {
+          _serieAtiva = _seriesFiltradas.first;
         }
+        _loadingDados = false;
       });
     } catch (e) {
-      _snack('Erro ao carregar histórico: $e');
-    } finally {
-      setState(() => _loadingHistorico = false);
+      _snack('Erro ao processar dados: $e', erro: true);
+      setState(() => _loadingDados = false);
     }
-  }
-
-  // ── Agrupamento por período ───────────────────────────────────────────────
-
-  /// Agrupa os pontos de uma série pelo período selecionado (mês ou dia),
-  /// retendo apenas o último preço registrado em cada período.
-  /// No modo 'tudo', retorna todos os pontos sem agrupar (timestamp completo).
-  List<_PontoHistorico> _agruparPontos(List<_PontoHistorico> pontos) {
-    if (pontos.isEmpty) return [];
-
-    // Modo "Tudo": sem agrupamento, usa timestamp real
-    if (_agrupamento == 'tudo') {
-      return [...pontos]..sort((a, b) => a.data.compareTo(b.data));
-    }
-
-    DateTime chave(_PontoHistorico p) {
-      if (_agrupamento == 'mes') {
-        return DateTime(p.data.year, p.data.month);
-      }
-      return DateTime(p.data.year, p.data.month, p.data.day);
-    }
-
-    final Map<DateTime, _PontoHistorico> porPeriodo = {};
-    for (final p in pontos) {
-      final k = chave(p);
-      // Mantém o mais recente do período
-      final existing = porPeriodo[k];
-      if (existing == null || p.data.isAfter(existing.data)) {
-        porPeriodo[k] = _PontoHistorico(
-          data: k, // normaliza a data para início do período
-          preco: p.preco,
-          precoAnterior: p.precoAnterior,
-          draftId: p.draftId,
-        );
-      }
-    }
-
-    return porPeriodo.values.toList()..sort((a, b) => a.data.compareTo(b.data));
-  }
-
-  List<_SerieHistorico> get _seriesAgrupadas => _seriesNoGrafico
-      .map(
-        (s) => _SerieHistorico(
-          productId: s.productId,
-          description: s.description,
-          pontos: _agruparPontos(s.pontos),
-        ),
-      )
-      .toList();
-
-  // ── KPIs globais ──────────────────────────────────────────────────────────
-
-  double? get _mediaInicial {
-    final selecionadas = _series
-        .where((s) => _materiaisSelecionados.contains(s.productId))
-        .toList();
-    if (selecionadas.isEmpty) return null;
-    return selecionadas.map((s) => s.precoInicial).reduce((a, b) => a + b) /
-        selecionadas.length;
-  }
-
-  double? get _mediaFinal {
-    final selecionadas = _series
-        .where((s) => _materiaisSelecionados.contains(s.productId))
-        .toList();
-    if (selecionadas.isEmpty) return null;
-    return selecionadas.map((s) => s.precoFinal).reduce((a, b) => a + b) /
-        selecionadas.length;
-  }
-
-  double? get _variacaoMediaPct {
-    final selecionadas = _series
-        .where((s) => _materiaisSelecionados.contains(s.productId))
-        .toList();
-    if (selecionadas.isEmpty) return null;
-    return selecionadas.map((s) => s.variacaoPct).reduce((a, b) => a + b) /
-        selecionadas.length;
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
-
-  void _snack(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
-  }
 
   double? _toDouble(dynamic v) {
     if (v == null) return null;
@@ -314,75 +219,36 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
     return double.tryParse(v.toString());
   }
 
-  String _fmtData(DateTime dt) {
-    final d = dt.day.toString().padLeft(2, '0');
-    final m = dt.month.toString().padLeft(2, '0');
-    return '$d/$m/${dt.year}';
+  void _filtrarLocal({required String busca}) {
+    _buscaProduto = busca;
+    if (busca.trim().isEmpty) {
+      _seriesFiltradas = List.from(_todasSeries);
+    } else {
+      final b = busca.toLowerCase();
+      _seriesFiltradas = _todasSeries.where((s) {
+        return s.productId.toLowerCase().contains(b) ||
+            s.description.toLowerCase().contains(b);
+      }).toList();
+    }
   }
 
-  String _fmtMes(DateTime dt) {
-    const meses = [
-      'Jan',
-      'Fev',
-      'Mar',
-      'Abr',
-      'Mai',
-      'Jun',
-      'Jul',
-      'Ago',
-      'Set',
-      'Out',
-      'Nov',
-      'Dez',
-    ];
-    return '${meses[dt.month - 1]}/${dt.year.toString().substring(2)}';
+  void _snack(String msg, {bool erro = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: erro ? Colors.red : Colors.green,
+      ),
+    );
   }
 
-  String _fmtHora(DateTime dt) {
-    final h = dt.hour.toString().padLeft(2, '0');
-    final m = dt.minute.toString().padLeft(2, '0');
-    return '${_fmtData(dt)} $h:$m';
-  }
-
-  String _fmtMoeda(double v) {
-    return 'R\$ ${v.toStringAsFixed(2).replaceAll('.', ',')}';
-  }
-
-  List<_SerieHistorico> get _seriesFiltradas {
-    if (_buscaMaterial.isEmpty) return _series;
-    final q = _buscaMaterial.toLowerCase();
-    return _series
-        .where(
-          (s) =>
-              s.description.toLowerCase().contains(q) ||
-              s.productId.toLowerCase().contains(q),
-        )
-        .toList();
-  }
-
-  List<_SerieHistorico> get _seriesNoGrafico => _series
-      .where((s) => _materiaisSelecionados.contains(s.productId))
-      .toList();
-
-  // ── Cores para séries ─────────────────────────────────────────────────────
-  static const _cores = [
-    Color(0xFFFF6B00),
-    Color(0xFF2563EB),
-    Color(0xFF16A34A),
-    Color(0xFF9333EA),
-    Color(0xFFEA580C),
-    Color(0xFF0891B2),
-    Color(0xFFD97706),
-    Color(0xFFDC2626),
-    Color(0xFF4F46E5),
-    Color(0xFF059669),
-  ];
-
-  Color _corPorIndex(int i) => _cores[i % _cores.length];
-
-  Color _corPorProductId(String pid) {
-    final idx = _seriesNoGrafico.indexWhere((s) => s.productId == pid);
-    return idx >= 0 ? _corPorIndex(idx) : Colors.grey;
+  String _formatarDataCompleta(DateTime dt) {
+    final local = dt.toLocal();
+    final d = local.day.toString().padLeft(2, '0');
+    final m = local.month.toString().padLeft(2, '0');
+    final a = local.year;
+    final h = local.hour.toString().padLeft(2, '0');
+    final min = local.minute.toString().padLeft(2, '0');
+    return '$d/$m/$a $h:$min';
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
@@ -390,842 +256,215 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F6F8),
+      backgroundColor: _bgSuave,
       body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _topbar(),
+          _topBarPremium(),
           Expanded(
-            child: _listaSelecionadaId == null
-                ? _estadoInicial()
-                : _loadingHistorico
-                ? const Center(child: CircularProgressIndicator())
-                : _corpo(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── Topbar ────────────────────────────────────────────────────────────────
-  Widget _topbar() {
-    return Container(
-      height: 64,
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Colors.grey.shade100)),
-      ),
-      child: Row(
-        children: [
-          const Text(
-            'Relatório de preços',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(width: 24),
-          _loadingListas
-              ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Flexible(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 340),
-                    child: DropdownButtonFormField<String>(
-                      value: _listaSelecionadaId,
-                      isExpanded: true,
-                      decoration: InputDecoration(
-                        hintText: 'Selecione uma lista de preço...',
-                        hintStyle: TextStyle(
-                          fontSize: 13,
-                          color: Colors.grey.shade400,
-                        ),
-                        isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(color: Colors.grey.shade300),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(color: Colors.grey.shade300),
-                        ),
-                      ),
-                      items: _listas.map((l) {
-                        return DropdownMenuItem<String>(
-                          value: l['id'].toString(),
-                          child: Text(
-                            l['description']?.toString() ?? l['id'],
-                            style: const TextStyle(fontSize: 13),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        );
-                      }).toList(),
-                      onChanged: (v) {
-                        if (v == null) return;
-                        final nome =
-                            _listas
-                                .firstWhere((l) => l['id'] == v)['description']
-                                ?.toString() ??
-                            v;
-                        setState(() {
-                          _listaSelecionadaId = v;
-                          _listaSelecionadaNome = nome;
-                        });
-                        _carregarHistorico(v);
-                      },
-                    ),
-                  ),
-                ),
-        ],
-      ),
-    );
-  }
-
-  // ── Estado inicial ────────────────────────────────────────────────────────
-  Widget _estadoInicial() {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.bar_chart_rounded, size: 64, color: Colors.grey.shade300),
-          const SizedBox(height: 16),
-          Text(
-            'Selecione uma lista de preço',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey.shade600,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'O gráfico mostrará a evolução de preços ao longo dos drafts aprovados.',
-            style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── Corpo principal ───────────────────────────────────────────────────────
-  Widget _corpo() {
-    if (_series.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.history_toggle_off_rounded,
-              size: 56,
-              color: Colors.grey.shade300,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Nenhum draft aprovado encontrado para "$_listaSelecionadaNome".',
-              style: TextStyle(fontSize: 15, color: Colors.grey.shade600),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'O histórico é construído a partir de rascunhos aprovados.',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        // Painel lateral de seleção de materiais
-        _painelMateriais(),
-
-        // Conteúdo principal: KPIs + gráfico + tabela
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _kpiChips(),
-              Expanded(flex: 3, child: _grafico()),
-              const Divider(height: 1),
-              Expanded(flex: 2, child: _tabelaHistorico()),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ── KPI Chips ─────────────────────────────────────────────────────────────
-  Widget _kpiChips() {
-    final ini = _mediaInicial;
-    final fin = _mediaFinal;
-    final pct = _variacaoMediaPct;
-
-    Color corVariacao = Colors.grey.shade600;
-    if (pct != null) {
-      corVariacao = pct > 0
-          ? Colors.green.shade700
-          : pct < 0
-          ? Colors.red.shade600
-          : Colors.grey.shade600;
-    }
-
-    return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Flexible(
-            child: _kpiChip(
-              label: 'Preço médio inicial',
-              valor: ini != null ? _fmtMoeda(ini) : '—',
-              icon: Icons.price_change_outlined,
-              cor: Colors.blue.shade700,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Flexible(
-            child: _kpiChip(
-              label: 'Preço médio atual',
-              valor: fin != null ? _fmtMoeda(fin) : '—',
-              icon: Icons.sell_outlined,
-              cor: _laranja,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Flexible(
-            child: _kpiChip(
-              label: 'Variação média',
-              valor: pct != null
-                  ? '${pct >= 0 ? '+' : ''}${pct.toStringAsFixed(2)}%'
-                  : '—',
-              icon: pct != null && pct >= 0
-                  ? Icons.trending_up_rounded
-                  : Icons.trending_down_rounded,
-              cor: corVariacao,
-              destaque: true,
-            ),
-          ),
-          const Spacer(),
-          // Toggle de agrupamento
-          Text(
-            'Agrupar por:',
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-          ),
-          const SizedBox(width: 8),
-          _toggleBtn(
-            'Mês',
-            _agrupamento == 'mes',
-            () => setState(() => _agrupamento = 'mes'),
-          ),
-          const SizedBox(width: 4),
-          _toggleBtn(
-            'Dia',
-            _agrupamento == 'dia',
-            () => setState(() => _agrupamento = 'dia'),
-          ),
-          const SizedBox(width: 4),
-          _toggleBtn(
-            'Tudo',
-            _agrupamento == 'tudo',
-            () => setState(() => _agrupamento = 'tudo'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _kpiChip({
-    required String label,
-    required String valor,
-    required IconData icon,
-    required Color cor,
-    bool destaque = false,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: BoxDecoration(
-        color: destaque ? cor.withOpacity(0.07) : Colors.grey.shade50,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: destaque ? cor.withOpacity(0.25) : Colors.grey.shade200,
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 18, color: cor),
-          const SizedBox(width: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 10,
-                  color: Colors.grey.shade500,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                valor,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  color: cor,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _toggleBtn(String label, bool active, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: active ? _laranja : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: active ? _laranja : Colors.grey.shade300),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: active ? Colors.white : Colors.grey.shade600,
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ── Painel de seleção de materiais ────────────────────────────────────────
-  Widget _painelMateriais() {
-    final filtrados = _seriesFiltradas;
-
-    return Container(
-      width: 260,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(right: BorderSide(color: Colors.grey.shade200)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      'Materiais',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                        color: Colors.grey.shade800,
-                      ),
-                    ),
-                    const Spacer(),
-                    TextButton(
-                      onPressed: () => setState(() {
-                        if (_materiaisSelecionados.length == _series.length) {
-                          _materiaisSelecionados.clear();
-                        } else {
-                          _materiaisSelecionados.addAll(
-                            _series.map((s) => s.productId),
-                          );
-                        }
-                      }),
-                      style: TextButton.styleFrom(
-                        padding: EdgeInsets.zero,
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      child: Text(
-                        _materiaisSelecionados.length == _series.length
-                            ? 'Desmarcar todos'
-                            : 'Selecionar todos',
-                        style: const TextStyle(fontSize: 11, color: _laranja),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  height: 36,
-                  child: TextField(
-                    decoration: InputDecoration(
-                      hintText: 'Buscar material...',
-                      hintStyle: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade400,
-                      ),
-                      prefixIcon: Icon(
-                        Icons.search,
-                        size: 16,
-                        color: Colors.grey.shade400,
-                      ),
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 0),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(color: Colors.grey.shade300),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(color: Colors.grey.shade300),
-                      ),
-                    ),
-                    style: const TextStyle(fontSize: 12),
-                    onChanged: (v) => setState(() => _buscaMaterial = v),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              itemCount: filtrados.length,
-              itemBuilder: (_, i) {
-                final s = filtrados[i];
-                final selected = _materiaisSelecionados.contains(s.productId);
-                final corIdx = _series.indexOf(s);
-                final cor = _corPorIndex(corIdx);
-
-                return InkWell(
-                  onTap: () => setState(() {
-                    selected
-                        ? _materiaisSelecionados.remove(s.productId)
-                        : _materiaisSelecionados.add(s.productId);
-                  }),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? cor.withOpacity(0.06)
-                          : Colors.transparent,
-                      border: selected
-                          ? Border(left: BorderSide(color: cor, width: 3))
-                          : null,
-                    ),
+            child: _loadingListas
+                ? const Center(
+                    child: CircularProgressIndicator(color: _laranja))
+                : Padding(
+                    padding: const EdgeInsets.all(24),
                     child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          width: 10,
-                          height: 10,
-                          decoration: BoxDecoration(
-                            color: selected ? cor : Colors.grey.shade300,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                s.description,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: selected
-                                      ? FontWeight.w600
-                                      : FontWeight.normal,
-                                  color: selected
-                                      ? Colors.grey.shade900
-                                      : Colors.grey.shade700,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              Text(
-                                '${s.productId} · ${s.pontos.length} mudança(s)',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: Colors.grey.shade500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Checkbox(
-                          value: selected,
-                          onChanged: (_) => setState(() {
-                            selected
-                                ? _materiaisSelecionados.remove(s.productId)
-                                : _materiaisSelecionados.add(s.productId);
-                          }),
-                          activeColor: cor,
-                          materialTapTargetSize:
-                              MaterialTapTargetSize.shrinkWrap,
-                          visualDensity: VisualDensity.compact,
-                        ),
+                        SizedBox(width: 320, child: _sidebarFiltros()),
+                        const SizedBox(width: 24),
+                        Expanded(child: _painelDashboardCentral()),
                       ],
                     ),
                   ),
-                );
-              },
-            ),
           ),
         ],
       ),
     );
   }
 
-  // ── Gráfico de linhas ─────────────────────────────────────────────────────
-  Widget _grafico() {
-    final series = _seriesAgrupadas;
-
-    if (series.isEmpty || series.every((s) => s.pontos.isEmpty)) {
-      return Container(
-        color: Colors.white,
-        child: Center(
-          child: Text(
-            'Selecione ao menos um material para visualizar o gráfico.',
-            style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
-          ),
-        ),
-      );
-    }
-
-    // Range Y
-    double yMin = double.infinity;
-    double yMax = double.negativeInfinity;
-    for (final s in series) {
-      for (final p in s.pontos) {
-        if (p.preco < yMin) yMin = p.preco;
-        if (p.preco > yMax) yMax = p.preco;
-      }
-    }
-    final rawPad = (yMax - yMin) * 0.15;
-    final yPad = rawPad < 1.0
-        ? (yMax * 0.05).clamp(1.0, double.infinity)
-        : rawPad;
-    yMin = (yMin - yPad).clamp(0, double.infinity);
-    yMax = yMax + yPad;
-
-    // Range X
-    DateTime? xMin, xMax;
-    for (final s in series) {
-      for (final p in s.pontos) {
-        if (xMin == null || p.data.isBefore(xMin)) xMin = p.data;
-        if (xMax == null || p.data.isAfter(xMax)) xMax = p.data;
-      }
-    }
-    if (xMin == null || xMax == null) return const SizedBox.shrink();
-
-    final span = xMax.difference(xMin).inMilliseconds;
-    // Quando todos os pontos são do mesmo dia, span é zero.
-    // Garante um padding mínimo de 1 dia para que xToPixel funcione.
-    final minPad = 1000 * 60 * 60 * 24; // 1 dia em ms
-    final pad = span > 0 ? (span * 0.15).round() : minPad;
-    final xMinP = xMin.subtract(Duration(milliseconds: pad));
-    final xMaxP = xMax.add(Duration(milliseconds: pad));
-    final xSpan = xMaxP.difference(xMinP).inMilliseconds.toDouble();
-
+  Widget _topBarPremium() {
     return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.fromLTRB(16, 12, 24, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      height: 80,
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+              color: Color(0x02000000),
+              blurRadius: 15,
+              offset: Offset(0, 4))
+        ],
+        border: Border(bottom: BorderSide(color: _slate100)),
+      ),
+      child: const Row(
         children: [
-          // Título + range de datas
-          Row(
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Evolução de preços — $_listaSelecionadaNome',
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                ),
+                'Business Intelligence & Auditoria',
+                style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                    color: _slate900,
+                    letterSpacing: -0.5),
               ),
-              const Spacer(),
-              if (_dataMin != null && _dataMax != null)
-                Text(
-                  '${_fmtData(_dataMin!)} → ${_fmtData(_dataMax!)}',
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
-                ),
+              Text(
+                'Rastreabilidade temporal de margens e volatilidade de preços',
+                style: TextStyle(
+                    fontSize: 12,
+                    color: _slate600,
+                    fontWeight: FontWeight.w500),
+              )
             ],
-          ),
-          const SizedBox(height: 6),
-
-          // Legenda de cores
-          Wrap(
-            spacing: 12,
-            runSpacing: 6,
-            children: [
-              for (var i = 0; i < series.length; i++)
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 200),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 14,
-                        height: 3,
-                        decoration: BoxDecoration(
-                          color: _corPorIndex(i),
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                      const SizedBox(width: 5),
-                      Flexible(
-                        child: Text(
-                          series[i].description,
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: Colors.grey.shade700,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 1,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 8),
-
-          // Gráfico
-          Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final w = constraints.maxWidth;
-                final h =
-                    constraints.maxHeight -
-                    20; // 20px reservado para labels do eixo X
-
-                double xToPixel(DateTime dt) {
-                  final ms = dt.difference(xMinP).inMilliseconds.toDouble();
-                  return (ms / xSpan) * w;
-                }
-
-                double yToPixel(double v) {
-                  final ratio = (v - yMin) / (yMax - yMin);
-                  return h - ratio * h;
-                }
-
-                return MouseRegion(
-                  onHover: (event) {
-                    final mx = event.localPosition.dx;
-                    _PontoHistorico? nearest;
-                    String? nearestPid;
-                    double minDist = double.infinity;
-
-                    for (final s in series) {
-                      for (final p in s.pontos) {
-                        final px = xToPixel(p.data);
-                        final dist = (px - mx).abs();
-                        if (dist < minDist) {
-                          minDist = dist;
-                          nearest = p;
-                          nearestPid = s.productId;
-                        }
-                      }
-                    }
-
-                    if (minDist < 40) {
-                      setState(() {
-                        _tooltipPonto = nearest;
-                        _tooltipProductId = nearestPid;
-                        _tooltipOffset = event.localPosition;
-                      });
-                    } else {
-                      setState(() => _tooltipPonto = null);
-                    }
-                  },
-                  onExit: (_) => setState(() => _tooltipPonto = null),
-                  child: Stack(
-                    children: [
-                      // Grid Y
-                      CustomPaint(
-                        size: Size(w, h),
-                        painter: _GridPainter(
-                          yMin: yMin,
-                          yMax: yMax,
-                          yLines: 5,
-                          fmtY: _fmtMoeda,
-                        ),
-                      ),
-                      // Labels X (datas)
-                      CustomPaint(
-                        size: Size(w, h),
-                        painter: _XAxisPainter(
-                          series: series,
-                          xToPixel: xToPixel,
-                          fmtX: _agrupamento == 'mes'
-                              ? _fmtMes
-                              : _agrupamento == 'tudo'
-                              ? _fmtHora
-                              : _fmtData,
-                        ),
-                      ),
-                      // Linhas
-                      for (var i = 0; i < series.length; i++)
-                        CustomPaint(
-                          size: Size(w, h),
-                          painter: _LinePainter(
-                            pontos: series[i].pontos,
-                            cor: _corPorIndex(i),
-                            xToPixel: xToPixel,
-                            yToPixel: yToPixel,
-                          ),
-                        ),
-                      // Tooltip
-                      if (_tooltipPonto != null)
-                        Positioned(
-                          left: (_tooltipOffset.dx + 12).clamp(0, w - 180),
-                          top: (_tooltipOffset.dy - 60).clamp(0, h - 80),
-                          child: _TooltipBox(
-                            ponto: _tooltipPonto!,
-                            productId: _tooltipProductId,
-                            series: series,
-                            cor: _tooltipProductId != null
-                                ? _corPorProductId(_tooltipProductId!)
-                                : _laranja,
-                            fmtData: _agrupamento == 'mes'
-                                ? _fmtMes
-                                : _agrupamento == 'tudo'
-                                ? _fmtHora
-                                : _fmtData,
-                            fmtMoeda: _fmtMoeda,
-                          ),
-                        ),
-                    ],
-                  ),
-                );
-              },
-            ),
           ),
         ],
       ),
     );
   }
 
-  // ── Tabela de histórico por material ──────────────────────────────────────
-  Widget _tabelaHistorico() {
-    final seriesVisiveis = _seriesNoGrafico;
+  // ── Sidebar ───────────────────────────────────────────────────────────────
 
-    return Container(
-      color: Colors.white,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Cabeçalho
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-            color: Colors.grey.shade50,
-            child: Row(
-              children: [
-                _th('', flex: 1), // ícone expandir
-                _th('Material', flex: 5),
-                _th('Preço inicial', flex: 2, align: TextAlign.right),
-                _th('Preço atual', flex: 2, align: TextAlign.right),
-                _th('Variação R\$', flex: 2, align: TextAlign.right),
-                _th('Variação %', flex: 2, align: TextAlign.right),
-                _th('Mudanças', flex: 2, align: TextAlign.center),
-              ],
-            ),
+  Widget _sidebarFiltros() {
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _slate200),
           ),
-          const Divider(height: 1),
-          Expanded(
-            child: seriesVisiveis.isEmpty
-                ? Center(
-                    child: Text(
-                      'Selecione materiais no painel à esquerda.',
-                      style: TextStyle(
-                        color: Colors.grey.shade500,
-                        fontSize: 13,
-                      ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'ESTRUTURA DE PRECIFICAÇÃO',
+                style: TextStyle(
+                    fontSize: 11,
+                    letterSpacing: 0.8,
+                    fontWeight: FontWeight.w800,
+                    color: _slate600),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: _listaSelecionadaId,
+                hint: const Text('Selecione uma tabela...',
+                    style: TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w500)),
+                isExpanded: true,
+                decoration: InputDecoration(
+                  fillColor: _bgSuave,
+                  filled: true,
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 12),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: _slate200)),
+                  focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: _laranja)),
+                ),
+                items: _listas.map((l) {
+                  return DropdownMenuItem(
+                    value: l.id,
+                    child: Text(l.description,
+                        style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: _slate900)),
+                  );
+                }).toList(),
+                onChanged: (val) {
+                  if (val != null) {
+                    setState(() => _listaSelecionadaId = val);
+                    _processarHistorico(val);
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        Expanded(
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _slate200),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                  child: TextField(
+                    onChanged: (v) => setState(() {
+                      _filtrarLocal(busca: v);
+                    }),
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600),
+                    decoration: InputDecoration(
+                      hintText: 'Buscar SKU ou descrição...',
+                      prefixIcon: const Icon(Icons.search_rounded,
+                          size: 18, color: _slate600),
+                      isDense: true,
+                      filled: true,
+                      fillColor: _bgSuave,
+                      contentPadding:
+                          const EdgeInsets.symmetric(vertical: 10),
+                      enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide(color: _slate200)),
+                      focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide:
+                              const BorderSide(color: _laranja)),
                     ),
-                  )
-                : ListView.builder(
-                    itemCount: seriesVisiveis.length,
-                    itemBuilder: (_, i) {
-                      final s = seriesVisiveis[i];
-                      final cor = _corPorProductId(s.productId);
-                      final expandido = _materiaisExpandidos.contains(
-                        s.productId,
-                      );
-                      final dif = s.variacaoAbsoluta;
-                      final pct = s.variacaoPct;
-                      final difColor = dif > 0
-                          ? Colors.green.shade700
-                          : dif < 0
-                          ? Colors.red.shade600
-                          : Colors.grey.shade500;
-
-                      return Column(
-                        children: [
-                          // Linha resumo (clicável)
-                          InkWell(
-                            onTap: () => setState(() {
-                              expandido
-                                  ? _materiaisExpandidos.remove(s.productId)
-                                  : _materiaisExpandidos.add(s.productId);
-                            }),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 20,
-                                vertical: 11,
-                              ),
-                              decoration: BoxDecoration(
-                                color: expandido ? cor.withOpacity(0.04) : null,
-                                border: expandido
-                                    ? Border(
-                                        left: BorderSide(color: cor, width: 3),
-                                      )
-                                    : null,
-                              ),
-                              child: Row(
-                                children: [
-                                  // Ícone expandir
-                                  Expanded(
-                                    flex: 1,
-                                    child: Icon(
-                                      expandido
-                                          ? Icons.keyboard_arrow_down
-                                          : Icons.keyboard_arrow_right,
-                                      size: 16,
+                  ),
+                ),
+                const Divider(height: 1, color: _slate100),
+                Expanded(
+                  child: _loadingDados
+                      ? const Center(
+                          child: CircularProgressIndicator(
+                              color: _laranja))
+                      : _seriesFiltradas.isEmpty
+                          ? Center(
+                              child: Text('Nenhum registro ativo',
+                                  style: TextStyle(
                                       color: Colors.grey.shade400,
-                                    ),
-                                  ),
-                                  // Material
-                                  Expanded(
-                                    flex: 5,
+                                      fontSize: 13)))
+                          : ListView.separated(
+                              itemCount: _seriesFiltradas.length,
+                              separatorBuilder: (_, __) =>
+                                  const Divider(
+                                      height: 1, color: _slate100),
+                              padding: EdgeInsets.zero,
+                              itemBuilder: (context, i) {
+                                final s = _seriesFiltradas[i];
+                                final ativo =
+                                    _serieAtiva?.productId ==
+                                        s.productId;
+                                final corPct = s.variacaoPct > 0
+                                    ? const Color(0xFF10B981)
+                                    : (s.variacaoPct < 0
+                                        ? const Color(0xFFEF4444)
+                                        : _slate600);
+
+                                return InkWell(
+                                  onTap: () => setState(
+                                      () => _serieAtiva = s),
+                                  child: AnimatedContainer(
+                                    duration: const Duration(
+                                        milliseconds: 150),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 20, vertical: 14),
+                                    color: ativo
+                                        ? _laranja.withOpacity(0.03)
+                                        : Colors.transparent,
                                     child: Row(
                                       children: [
-                                        Container(
-                                          width: 8,
-                                          height: 8,
-                                          decoration: BoxDecoration(
-                                            color: cor,
-                                            shape: BoxShape.circle,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
                                         Expanded(
                                           child: Column(
                                             crossAxisAlignment:
@@ -1233,307 +472,460 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
                                             children: [
                                               Text(
                                                 s.description,
-                                                style: const TextStyle(
-                                                  fontSize: 12,
-                                                  fontWeight: FontWeight.w500,
-                                                ),
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                              Text(
-                                                s.productId,
                                                 style: TextStyle(
-                                                  fontSize: 10,
-                                                  color: Colors.grey.shade500,
-                                                  fontFamily: 'monospace',
-                                                ),
+                                                    fontSize: 13,
+                                                    fontWeight: ativo
+                                                        ? FontWeight.w800
+                                                        : FontWeight.w600,
+                                                    color: _slate900),
+                                                overflow:
+                                                    TextOverflow.ellipsis,
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                'REF: ${s.productId}',
+                                                style: TextStyle(
+                                                    fontSize: 11,
+                                                    fontFamily: 'monospace',
+                                                    color: Colors
+                                                        .grey.shade400,
+                                                    fontWeight:
+                                                        FontWeight.bold),
                                               ),
                                             ],
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Container(
+                                          padding: const EdgeInsets
+                                              .symmetric(
+                                              horizontal: 8,
+                                              vertical: 4),
+                                          decoration: BoxDecoration(
+                                              color: corPct
+                                                  .withOpacity(0.08),
+                                              borderRadius:
+                                                  BorderRadius.circular(
+                                                      8)),
+                                          child: Text(
+                                            '${s.variacaoPct > 0 ? '+' : ''}${s.variacaoPct.toStringAsFixed(1)}%',
+                                            style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w800,
+                                                color: corPct),
                                           ),
                                         ),
                                       ],
                                     ),
                                   ),
-                                  // Preço inicial
-                                  Expanded(
-                                    flex: 2,
-                                    child: Text(
-                                      _fmtMoeda(s.precoInicial),
-                                      textAlign: TextAlign.right,
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.grey.shade600,
-                                      ),
-                                    ),
-                                  ),
-                                  // Preço atual
-                                  Expanded(
-                                    flex: 2,
-                                    child: Text(
-                                      _fmtMoeda(s.precoFinal),
-                                      textAlign: TextAlign.right,
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                  // Variação R$
-                                  Expanded(
-                                    flex: 2,
-                                    child: Text(
-                                      '${dif >= 0 ? '+' : ''}${_fmtMoeda(dif)}',
-                                      textAlign: TextAlign.right,
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                        color: difColor,
-                                      ),
-                                    ),
-                                  ),
-                                  // Variação %
-                                  Expanded(
-                                    flex: 2,
-                                    child: Text(
-                                      '${pct >= 0 ? '+' : ''}${pct.toStringAsFixed(2)}%',
-                                      textAlign: TextAlign.right,
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                        color: difColor,
-                                      ),
-                                    ),
-                                  ),
-                                  // Nº de mudanças
-                                  Expanded(
-                                    flex: 2,
-                                    child: Center(
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 3,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: cor.withOpacity(0.10),
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                        ),
-                                        child: Text(
-                                          '${s.pontos.length}',
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w600,
-                                            color: cor,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
+                                );
+                              },
                             ),
-                          ),
-
-                          // Sublinhas da evolução (quando expandido)
-                          if (expandido) ...[
-                            Container(
-                              color: Colors.grey.shade50,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 20,
-                                vertical: 6,
-                              ),
-                              child: Row(
-                                children: [
-                                  const Expanded(flex: 1, child: SizedBox()),
-                                  _thSub('Data', flex: 3),
-                                  _thSub(
-                                    'Preço anterior',
-                                    flex: 2,
-                                    align: TextAlign.right,
-                                  ),
-                                  _thSub(
-                                    'Novo preço',
-                                    flex: 2,
-                                    align: TextAlign.right,
-                                  ),
-                                  _thSub(
-                                    'Variação R\$',
-                                    flex: 2,
-                                    align: TextAlign.right,
-                                  ),
-                                  _thSub(
-                                    'Variação %',
-                                    flex: 2,
-                                    align: TextAlign.right,
-                                  ),
-                                  const Expanded(flex: 2, child: SizedBox()),
-                                ],
-                              ),
-                            ),
-                            for (var j = 0; j < s.pontos.length; j++) ...[
-                              _linhaEvolucao(
-                                s.pontos[j],
-                                j > 0 ? s.pontos[j - 1].preco : null,
-                                cor,
-                              ),
-                            ],
-                            const Divider(height: 1, thickness: 1),
-                          ] else
-                            Divider(height: 1, color: Colors.grey.shade100),
-                        ],
-                      );
-                    },
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _linhaEvolucao(
-    _PontoHistorico ponto,
-    double? precoAnteriorFallback,
-    Color cor,
-  ) {
-    // Usa o old_price salvo no draft; se não tiver, usa o ponto anterior da série
-    final anterior = ponto.precoAnterior ?? precoAnteriorFallback;
-    final dif = anterior != null ? ponto.preco - anterior : null;
-    final pct = (anterior != null && anterior > 0 && dif != null)
-        ? (dif / anterior) * 100
-        : null;
-    final difColor = dif == null
-        ? Colors.grey.shade500
-        : dif > 0
-        ? Colors.green.shade700
-        : dif < 0
-        ? Colors.red.shade600
-        : Colors.grey.shade500;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(
-          left: BorderSide(color: cor.withOpacity(0.3), width: 3),
-          bottom: BorderSide(color: Colors.grey.shade100),
-        ),
-      ),
-      child: Row(
-        children: [
-          const Expanded(flex: 1, child: SizedBox()),
-          // Data
-          Expanded(
-            flex: 3,
-            child: Row(
-              children: [
-                Icon(Icons.circle, size: 6, color: cor.withOpacity(0.5)),
-                const SizedBox(width: 8),
-                Text(
-                  _agrupamento == 'mes'
-                      ? _fmtMes(ponto.data)
-                      : _agrupamento == 'tudo'
-                      ? _fmtHora(ponto.data)
-                      : _fmtData(ponto.data),
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
                 ),
               ],
             ),
           ),
-          // Preço anterior
-          Expanded(
-            flex: 2,
-            child: Text(
-              anterior != null ? _fmtMoeda(anterior) : '—',
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                fontSize: 11,
-                color: Colors.grey.shade500,
-                decoration: anterior != null
-                    ? TextDecoration.lineThrough
-                    : null,
+        ),
+      ],
+    );
+  }
+
+  // ── Painel central ────────────────────────────────────────────────────────
+
+  Widget _painelDashboardCentral() {
+    if (_listaSelecionadaId == null) {
+      return _buildEstadoVazio(
+          'Selecione uma estrutura comercial',
+          'Escolha uma tabela operacional no painel esquerdo para gerar os modelos temporais.',
+          Icons.analytics_outlined);
+    }
+    if (_loadingDados) {
+      return const Center(
+          child: CircularProgressIndicator(color: _laranja));
+    }
+    if (_todasSeries.isEmpty) {
+      return _buildEstadoVazio(
+          'Sem movimentações catalogadas',
+          'Esta lista de preço não possui históricos ou alterações submetidas via rascunho até o momento.',
+          Icons.auto_graph_rounded);
+    }
+
+    final maiorAlta = _todasSeries.firstWhere(
+        (s) => s.variacaoPct > 0,
+        orElse: () => _todasSeries.first);
+    final maiorQueda = _todasSeries.lastWhere((s) => s.variacaoPct < 0,
+        orElse: () => _todasSeries.last);
+
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── RIBBON DE KPIS ──
+          Row(
+            children: [
+              _kpiCardDashboard(
+                title: 'MATERIAIS MONITORADOS',
+                value: '${_todasSeries.length} SKUs',
+                sub: 'Auditados em tempo real',
+                icon: Icons.inventory_2_outlined,
+                bg: const Color(0xFFEFF6FF),
+                fg: const Color(0xFF1D4ED8),
+              ),
+              const SizedBox(width: 16),
+              _kpiCardDashboard(
+                title: 'MAIOR VOLATILIDADE',
+                value:
+                    '${maiorAlta.variacaoPct.toStringAsFixed(1)}%',
+                sub: maiorAlta.description,
+                icon: Icons.trending_up_rounded,
+                bg: const Color(0xFFECFDF5),
+                fg: const Color(0xFF047857),
+              ),
+              const SizedBox(width: 16),
+              _kpiCardDashboard(
+                title: 'ESTABILIDADE DE PREÇO',
+                value:
+                    '${maiorQueda.variacaoPct.toStringAsFixed(1)}%',
+                sub: maiorQueda.description,
+                icon: Icons.trending_down_rounded,
+                bg: const Color(0xFFFFF1F2),
+                fg: const Color(0xFFB91C1C),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+
+          // ── GRÁFICO ──
+          if (_serieAtiva != null) ...[
+            Container(
+              padding: const EdgeInsets.all(28),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: _slate200),
+                boxShadow: const [
+                  BoxShadow(
+                      color: Color(0x02000000), blurRadius: 20)
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment:
+                        MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                          children: [
+                            Text(_serieAtiva!.description,
+                                style: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w900,
+                                    color: _slate900,
+                                    letterSpacing: -0.5)),
+                            const SizedBox(height: 4),
+                            Text(
+                                'ID Único do Material: ${_serieAtiva!.productId}',
+                                style: const TextStyle(
+                                    fontSize: 12,
+                                    color: _slate600,
+                                    fontFamily: 'monospace')),
+                          ],
+                        ),
+                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          const Text('PREÇO ATUAL COMERCIAL',
+                              style: TextStyle(
+                                  fontSize: 10,
+                                  letterSpacing: 0.6,
+                                  fontWeight: FontWeight.bold,
+                                  color: _slate600)),
+                          Text(
+                              'R\$ ${_serieAtiva!.precoFinal.toStringAsFixed(2).replaceAll('.', ',')}',
+                              style: const TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w900,
+                                  color: _slate900)),
+                        ],
+                      )
+                    ],
+                  ),
+                  const SizedBox(height: 32),
+                  Container(
+                    height: 260,
+                    width: double.infinity,
+                    padding:
+                        const EdgeInsets.only(right: 16, top: 12),
+                    child: CustomPaint(
+                      painter: _PremiumChartPainter(
+                          serie: _serieAtiva!),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ),
-          // Novo preço
-          Expanded(
-            flex: 2,
-            child: Text(
-              _fmtMoeda(ponto.preco),
-              textAlign: TextAlign.right,
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-            ),
-          ),
-          // Variação R$
-          Expanded(
-            flex: 2,
-            child: Text(
-              dif != null ? '${dif >= 0 ? '+' : ''}${_fmtMoeda(dif)}' : '—',
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: difColor,
+            const SizedBox(height: 24),
+
+            // ── TABELA DE AUDITORIA ──
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: _slate200),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Text(
+                        'Trilha de Auditoria Técnica (Rascunhos Aprovados)',
+                        style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            color: _slate900)),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 12),
+                    color: _bgSuave,
+                    child: Row(
+                      children: [
+                        Expanded(
+                            flex: 3,
+                            child: _gridHeaderLabel(
+                                'DATA DA MUDANÇA')),
+                        Expanded(
+                            flex: 3,
+                            child: _gridHeaderLabel(
+                                'PREÇO ANTERIOR')),
+                        Expanded(
+                            flex: 3,
+                            child: _gridHeaderLabel(
+                                'NOVO VALOR BASE')),
+                        Expanded(
+                            flex: 2,
+                            child:
+                                _gridHeaderLabel('VARIAÇÃO LIQ.')),
+                        Expanded(
+                            flex: 4,
+                            child: _gridHeaderLabel(
+                                'PROTOCOLO/DRAFT ID',
+                                align: TextAlign.right)),
+                      ],
+                    ),
+                  ),
+                  ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: _serieAtiva!.pontos.length,
+                    separatorBuilder: (_, __) =>
+                        const Divider(height: 1, color: _slate100),
+                    itemBuilder: (context, idx) {
+                      final p = _serieAtiva!.pontos[idx];
+
+                      // Usa old_price do item; fallback para o ponto anterior
+                      final anterior = p.precoAnterior ??
+                          (idx > 0
+                              ? _serieAtiva!.pontos[idx - 1].preco
+                              : null);
+
+                      double? diffPct;
+                      if (anterior != null && anterior > 0) {
+                        diffPct =
+                            ((p.preco - anterior) / anterior) * 100;
+                      }
+
+                      final corBadge = diffPct == null ||
+                              diffPct == 0
+                          ? _slate600
+                          : (diffPct > 0
+                              ? const Color(0xFF10B981)
+                              : const Color(0xFFEF4444));
+
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 24, vertical: 16),
+                        child: Row(
+                          children: [
+                            Expanded(
+                                flex: 3,
+                                child: Text(
+                                    _formatarDataCompleta(p.data),
+                                    style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: _slate900))),
+                            Expanded(
+                              flex: 3,
+                              child: Text(
+                                anterior != null
+                                    ? 'R\$ ${anterior.toStringAsFixed(2).replaceAll('.', ',')}'
+                                    : '—',
+                                style: const TextStyle(
+                                    fontSize: 13, color: _slate600),
+                              ),
+                            ),
+                            Expanded(
+                                flex: 3,
+                                child: Text(
+                                    'R\$ ${p.preco.toStringAsFixed(2).replaceAll('.', ',')}',
+                                    style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.bold,
+                                        color: _slate900))),
+                            Expanded(
+                              flex: 2,
+                              child: diffPct == null
+                                  ? const Text('Base',
+                                      style: TextStyle(
+                                          fontSize: 13,
+                                          color: _slate600))
+                                  : Text(
+                                      '${diffPct > 0 ? '+' : ''}${diffPct.toStringAsFixed(1)}%',
+                                      style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.bold,
+                                          color: corBadge),
+                                    ),
+                            ),
+                            Expanded(
+                              flex: 4,
+                              child: Text(
+                                p.draftId,
+                                textAlign: TextAlign.right,
+                                style: const TextStyle(
+                                    fontSize: 11,
+                                    fontFamily: 'monospace',
+                                    color: _slate600,
+                                    fontWeight: FontWeight.bold),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ],
               ),
             ),
-          ),
-          // Variação %
-          Expanded(
-            flex: 2,
-            child: Text(
-              pct != null
-                  ? '${pct >= 0 ? '+' : ''}${pct.toStringAsFixed(2)}%'
-                  : '—',
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: difColor,
-              ),
-            ),
-          ),
-          const Expanded(flex: 2, child: SizedBox()),
+          ],
         ],
       ),
     );
   }
 
-  static Widget _th(
-    String label, {
-    required int flex,
-    TextAlign align = TextAlign.left,
+  // ── Widgets auxiliares ────────────────────────────────────────────────────
+
+  Widget _kpiCardDashboard({
+    required String title,
+    required String value,
+    required String sub,
+    required IconData icon,
+    required Color bg,
+    required Color fg,
   }) {
     return Expanded(
-      flex: flex,
-      child: Text(
-        label,
-        textAlign: align,
-        overflow: TextOverflow.ellipsis,
-        maxLines: 1,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: Colors.grey.shade600,
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: _slate200),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                  color: bg, borderRadius: BorderRadius.circular(12)),
+              child: Icon(icon, color: fg, size: 22),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: TextStyle(
+                          fontSize: 10,
+                          letterSpacing: 0.6,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.grey.shade400)),
+                  const SizedBox(height: 4),
+                  Text(value,
+                      style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                          color: _slate900,
+                          letterSpacing: -0.5)),
+                  const SizedBox(height: 2),
+                  Text(sub,
+                      style: const TextStyle(
+                          fontSize: 12,
+                          color: _slate600,
+                          fontWeight: FontWeight.w500),
+                      overflow: TextOverflow.ellipsis),
+                ],
+              ),
+            )
+          ],
         ),
       ),
     );
   }
 
-  static Widget _thSub(
-    String label, {
-    required int flex,
-    TextAlign align = TextAlign.left,
-  }) {
-    return Expanded(
-      flex: flex,
-      child: Text(
-        label,
+  Widget _gridHeaderLabel(String label,
+      {TextAlign align = TextAlign.left}) {
+    return Text(label,
         textAlign: align,
-        overflow: TextOverflow.ellipsis,
-        maxLines: 1,
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w600,
-          color: Colors.grey.shade500,
+        style: const TextStyle(
+            fontSize: 11,
+            letterSpacing: 0.6,
+            fontWeight: FontWeight.w800,
+            color: _slate600));
+  }
+
+  Widget _buildEstadoVazio(String t, String s, IconData icon) {
+    return Container(
+      width: double.infinity,
+      height: 400,
+      decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: _slate200)),
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: const BoxDecoration(
+                  color: _bgSuave, shape: BoxShape.circle),
+              child:
+                  Icon(icon, size: 44, color: Colors.grey.shade300),
+            ),
+            const SizedBox(height: 16),
+            Text(t,
+                style: const TextStyle(
+                    color: _slate900,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800)),
+            const SizedBox(height: 6),
+            SizedBox(
+              width: 400,
+              child: Text(s,
+                  style: const TextStyle(
+                      color: _slate600, fontSize: 13, height: 1.4),
+                  textAlign: TextAlign.center),
+            ),
+          ],
         ),
       ),
     );
@@ -1541,261 +933,147 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CustomPainters
+// Custom Painter Estilizado
 // ─────────────────────────────────────────────────────────────────────────────
-class _GridPainter extends CustomPainter {
-  final double yMin, yMax;
-  final int yLines;
-  final String Function(double) fmtY;
-
-  _GridPainter({
-    required this.yMin,
-    required this.yMax,
-    required this.yLines,
-    required this.fmtY,
-  });
+class _PremiumChartPainter extends CustomPainter {
+  final _SerieHistorico serie;
+  _PremiumChartPainter({required this.serie});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final linePaint = Paint()
-      ..color = Colors.grey.shade100
-      ..strokeWidth = 1;
-    final textStyle = TextStyle(
-      fontSize: 10,
-      color: Colors.grey.shade400,
-      fontFamily: 'monospace',
-    );
-
-    for (var i = 0; i <= yLines; i++) {
-      final ratio = i / yLines;
-      final y = size.height - ratio * size.height;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), linePaint);
-
-      final valor = yMin + (yMax - yMin) * ratio;
-      final tp = TextPainter(
-        text: TextSpan(text: fmtY(valor), style: textStyle),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      tp.paint(canvas, Offset(0, y - 12));
-    }
-  }
-
-  @override
-  bool shouldRepaint(_GridPainter old) => old.yMin != yMin || old.yMax != yMax;
-}
-
-class _XAxisPainter extends CustomPainter {
-  final List<_SerieHistorico> series;
-  final double Function(DateTime) xToPixel;
-  final String Function(DateTime) fmtX;
-
-  _XAxisPainter({
-    required this.series,
-    required this.xToPixel,
-    required this.fmtX,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final textStyle = TextStyle(
-      fontSize: 9,
-      color: Colors.grey.shade400,
-      fontFamily: 'monospace',
-    );
-    final tickPaint = Paint()
-      ..color = Colors.grey.shade200
-      ..strokeWidth = 1;
-
-    // Coleta datas únicas de todos os pontos
-    final Set<DateTime> datas = {};
-    for (final s in series) {
-      for (final p in s.pontos) {
-        datas.add(p.data);
-      }
-    }
-
-    for (final dt in datas) {
-      final x = xToPixel(dt);
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), tickPaint);
-      final tp = TextPainter(
-        text: TextSpan(text: fmtX(dt), style: textStyle),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      tp.paint(canvas, Offset(x - tp.width / 2, size.height - 14));
-    }
-  }
-
-  @override
-  bool shouldRepaint(_XAxisPainter old) => true;
-}
-
-class _LinePainter extends CustomPainter {
-  final List<_PontoHistorico> pontos;
-  final Color cor;
-  final double Function(DateTime) xToPixel;
-  final double Function(double) yToPixel;
-
-  _LinePainter({
-    required this.pontos,
-    required this.cor,
-    required this.xToPixel,
-    required this.yToPixel,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
+    final pontos = serie.pontos;
     if (pontos.isEmpty) return;
 
-    final linePaint = Paint()
-      ..color = cor
-      ..strokeWidth = 2
-      ..style = PaintingStyle.stroke
-      ..strokeJoin = StrokeJoin.round;
+    final precos = pontos.map((p) => p.preco).toList();
+    double minPreco = precos.reduce((a, b) => a < b ? a : b);
+    double maxPreco = precos.reduce((a, b) => a > b ? a : b);
 
-    final dotPaint = Paint()
-      ..color = cor
+    if (maxPreco == minPreco) {
+      maxPreco += 10;
+      minPreco -= 10;
+    } else {
+      final padding = (maxPreco - minPreco) * 0.15;
+      maxPreco += padding;
+      minPreco -= padding;
+    }
+
+    if (minPreco < 0) minPreco = 0;
+
+    final paintGrid = Paint()
+      ..color = const Color(0xFFF1F5F9)
+      ..strokeWidth = 1.2;
+
+    final paintLinhaPrincipal = Paint()
+      ..color = const Color(0xFFFF6B00)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.5
+      ..strokeCap = StrokeCap.round;
+
+    final paintPontoCompleto = Paint()
+      ..color = const Color(0xFFFF6B00)
       ..style = PaintingStyle.fill;
 
-    final dotBorderPaint = Paint()
+    final paintPontoInterno = Paint()
       ..color = Colors.white
       ..style = PaintingStyle.fill;
 
-    // Se só tem 1 ponto, desenha uma linha horizontal tracejada + ponto central
-    if (pontos.length == 1) {
-      final p = pontos.first;
-      final x = xToPixel(p.data);
-      final y = yToPixel(p.preco);
-      final dashedPaint = Paint()
-        ..color = cor.withOpacity(0.35)
-        ..strokeWidth = 1.5
-        ..style = PaintingStyle.stroke;
-      // Linha tracejada horizontal
-      const dashW = 6.0, gapW = 4.0;
-      double dx = 0;
-      while (dx < size.width) {
-        canvas.drawLine(
-          Offset(dx, y),
-          Offset((dx + dashW).clamp(0, size.width), y),
-          dashedPaint,
-        );
-        dx += dashW + gapW;
-      }
-      canvas.drawCircle(Offset(x, y), 6, dotBorderPaint);
-      canvas.drawCircle(Offset(x, y), 4, dotPaint);
-      return;
-    }
+    const totalGrids = 4;
+    for (int i = 0; i <= totalGrids; i++) {
+      final y = size.height * (i / totalGrids);
+      canvas.drawLine(Offset(45, y), Offset(size.width, y), paintGrid);
 
-    final path = Path();
-    for (var i = 0; i < pontos.length; i++) {
-      final p = pontos[i];
-      final x = xToPixel(p.data);
-      final y = yToPixel(p.preco);
-      if (i == 0) {
-        path.moveTo(x, y);
-      } else {
-        // Linha em degrau para destacar mudanças pontuais
-        final prevX = xToPixel(pontos[i - 1].data);
-        path.lineTo(prevX + (x - prevX) * 0.5, yToPixel(pontos[i - 1].preco));
-        path.lineTo(prevX + (x - prevX) * 0.5, y);
-        path.lineTo(x, y);
-      }
-    }
-    canvas.drawPath(path, linePaint);
-
-    for (final p in pontos) {
-      final x = xToPixel(p.data);
-      final y = yToPixel(p.preco);
-      canvas.drawCircle(Offset(x, y), 6, dotBorderPaint);
-      canvas.drawCircle(Offset(x, y), 4, dotPaint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_LinePainter old) => true;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Tooltip
-// ─────────────────────────────────────────────────────────────────────────────
-class _TooltipBox extends StatelessWidget {
-  final _PontoHistorico ponto;
-  final String? productId;
-  final List<_SerieHistorico> series;
-  final Color cor;
-  final String Function(DateTime) fmtData;
-  final String Function(double) fmtMoeda;
-
-  const _TooltipBox({
-    required this.ponto,
-    required this.productId,
-    required this.series,
-    required this.cor,
-    required this.fmtData,
-    required this.fmtMoeda,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final serie = productId != null
-        ? series.cast<_SerieHistorico?>().firstWhere(
-            (s) => s?.productId == productId,
-            orElse: () => null,
-          )
-        : null;
-
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: cor.withOpacity(0.3)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      constraints: const BoxConstraints(minWidth: 160, maxWidth: 220),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (serie != null) ...[
-            Text(
-              serie.description,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: cor,
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(height: 4),
-          ],
-          Text(
-            fmtData(ponto.data),
-            style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            fmtMoeda(ponto.preco),
-            style: TextStyle(
-              fontSize: 16,
+      final valorY =
+          maxPreco - ((maxPreco - minPreco) * (i / totalGrids));
+      final textPainter = TextPainter(
+        text: TextSpan(
+          text: 'R\$ ${valorY.toStringAsFixed(0)}',
+          style: TextStyle(
+              color: Colors.grey.shade400,
+              fontSize: 10,
               fontWeight: FontWeight.bold,
-              color: cor,
-            ),
-          ),
-          if (ponto.precoAnterior != null) ...[
-            const SizedBox(height: 2),
-            Text(
-              'Anterior: ${fmtMoeda(ponto.precoAnterior!)}',
-              style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
-            ),
+              fontFamily: 'monospace'),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      textPainter.paint(canvas, Offset(0, y - 6));
+    }
+
+    final deparamentoPontos = <Offset>[];
+    final stepX = pontos.length > 1
+        ? (size.width - 60) / (pontos.length - 1)
+        : size.width - 60;
+
+    for (int i = 0; i < pontos.length; i++) {
+      final p = pontos[i];
+      final x = 55 + (i * stepX);
+      final pctY = (p.preco - minPreco) / (maxPreco - minPreco);
+      final y = size.height * (1 - pctY);
+      deparamentoPontos.add(Offset(x, y));
+    }
+
+    if (deparamentoPontos.length > 1) {
+      final pathGradiente = Path()
+        ..moveTo(deparamentoPontos.first.dx, size.height);
+      for (final pt in deparamentoPontos) {
+        pathGradiente.lineTo(pt.dx, pt.dy);
+      }
+      pathGradiente.lineTo(deparamentoPontos.last.dx, size.height);
+      pathGradiente.close();
+
+      final paintSombra = Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            const Color(0xFFFF6B00).withOpacity(0.12),
+            const Color(0xFFFF6B00).withOpacity(0.00),
           ],
-        ],
-      ),
-    );
+        ).createShader(
+            Rect.fromLTWH(0, 0, size.width, size.height));
+
+      canvas.drawPath(pathGradiente, paintSombra);
+    }
+
+    if (deparamentoPontos.length > 1) {
+      final pathLinha = Path()
+        ..moveTo(deparamentoPontos.first.dx,
+            deparamentoPontos.first.dy);
+      for (int i = 1; i < deparamentoPontos.length; i++) {
+        pathLinha.lineTo(
+            deparamentoPontos[i].dx, deparamentoPontos[i].dy);
+      }
+      canvas.drawPath(pathLinha, paintLinhaPrincipal);
+    }
+
+    for (int i = 0; i < deparamentoPontos.length; i++) {
+      final pt = deparamentoPontos[i];
+      final p = pontos[i];
+
+      canvas.drawCircle(pt, 5.5, paintPontoCompleto);
+      canvas.drawCircle(pt, 2.5, paintPontoInterno);
+
+      if (i == 0 ||
+          i == deparamentoPontos.length - 1 ||
+          deparamentoPontos.length <= 6) {
+        final labelData =
+            '${p.data.day.toString().padLeft(2, '0')}/${p.data.month.toString().padLeft(2, '0')}';
+        final txtDataPainter = TextPainter(
+          text: TextSpan(
+            text: labelData,
+            style: TextStyle(
+                color: Colors.grey.shade500,
+                fontSize: 10,
+                fontWeight: FontWeight.bold),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        txtDataPainter.paint(
+            canvas, Offset(pt.dx - 12, size.height + 8));
+      }
+    }
   }
+
+  @override
+  bool shouldRepaint(covariant _PremiumChartPainter oldDelegate) =>
+      oldDelegate.serie != serie;
 }

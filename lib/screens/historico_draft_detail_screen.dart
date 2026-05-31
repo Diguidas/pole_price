@@ -1,7 +1,4 @@
 // historico_draft_detail_screen.dart
-// Tela de visualização somente-leitura de um draft aprovado/rejeitado/pendente.
-// Aberta a partir do HistoricoScreen ao clicar em uma linha.
-// Reutiliza os mesmos widgets de detalhes da AprovacoesScreen, mas sem botões de ação.
 import 'package:flutter/material.dart';
 import 'package:pole_price/service/draft_pricing_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -34,6 +31,12 @@ class HistoricoDraftDetailScreen extends StatefulWidget {
 class _HistoricoDraftDetailScreenState
     extends State<HistoricoDraftDetailScreen> {
   static const _laranja = Color(0xFFFF6B00);
+  static const _slate900 = Color(0xFF0F172A);
+  static const _slate600 = Color(0xFF475569);
+  static const _slate400 = Color(0xFF94A3B8);
+  static const _slate200 = Color(0xFFE2E8F0);
+  static const _slate100 = Color(0xFFF1F5F9);
+  static const _bgSuave = Color(0xFFF8FAFC);
 
   late final DraftPricingService _draftService;
   bool _loading = true;
@@ -62,7 +65,6 @@ class _HistoricoDraftDetailScreenState
       setState(() {
         _materiais = preview.materiais.map((m) => m.toRowMap()).toList();
         _resumo = preview.resumo;
-        // Expande todos os grupos por padrão na visualização de histórico
         for (final m in _materiais) {
           _listasExpandidas.add(m['lista_id'] as String);
         }
@@ -74,13 +76,10 @@ class _HistoricoDraftDetailScreenState
     }
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
   (String label, Color bg, Color fg) get _statusConfig => switch (widget.status) {
-        'approved' =>
-          ('Aprovado', Colors.green.shade50, Colors.green.shade700),
-        'rejected' => ('Rejeitado', Colors.red.shade50, Colors.red.shade700),
-        _ => ('Pendente', _laranja.withOpacity(0.10), _laranja),
+        'approved' => ('Aprovado', const Color(0xFFECFDF5), const Color(0xFF047857)),
+        'rejected' => ('Rejeitado', const Color(0xFFFFF1F2), const Color(0xFFB91C1C)),
+        _ => ('Pendente', const Color(0xFFFFF7ED), const Color(0xFFC2410C)),
       };
 
   Map<String, List<Map<String, dynamic>>> _agruparPorLista() {
@@ -131,7 +130,7 @@ class _HistoricoDraftDetailScreenState
 
   _KpisSummary _kpis() {
     final total = _materiais.length;
-    final alterados = _materiais.where((m) => m['foi_editado'] == true).length;
+    final alterados = _materialsFiltradosTotal();
     final excecoes = _materiais
         .where((m) => _statusLabelItem(m) == 'Exceção manual')
         .length;
@@ -147,51 +146,49 @@ class _HistoricoDraftDetailScreenState
         listasFilhas: listas);
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────
+  int _materialsFiltradosTotal() => _materiais.where((m) => m['foi_editado'] == true).length;
 
   @override
   Widget build(BuildContext context) {
     final (statusLabel, statusBg, statusFg) = _statusConfig;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F6F8),
+      backgroundColor: _bgSuave,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // ── Topbar ──────────────────────────────────────────────────────
+          // Topbar Premium com Breadcrumb integrado
           Container(
-            padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
-            color: Colors.white,
+            padding: const EdgeInsets.fromLTRB(32, 20, 32, 20),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              border: Border(bottom: BorderSide(color: _slate100)),
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Breadcrumb
                 Row(
                   children: [
                     GestureDetector(
                       onTap: () => Navigator.of(context).pop(),
-                      child: Text('Histórico',
-                          style: TextStyle(
-                              fontSize: 13, color: Colors.grey.shade500)),
+                      child: const Text('Histórico',
+                          style: TextStyle(fontSize: 12, color: _slate600, fontWeight: FontWeight.w600)),
                     ),
-                    Icon(Icons.chevron_right,
-                        size: 16, color: Colors.grey.shade400),
+                    const Icon(Icons.chevron_right_rounded, size: 16, color: _slate400),
                     Text(widget.nomeLista,
-                        style: TextStyle(
-                            fontSize: 13, color: Colors.grey.shade700)),
+                        style: const TextStyle(fontSize: 12, color: _slate900, fontWeight: FontWeight.w700)),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
                 Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    // Botão voltar
                     IconButton(
                       icon: const Icon(Icons.arrow_back_rounded),
                       onPressed: () => Navigator.of(context).pop(),
-                      color: Colors.grey.shade700,
+                      color: _slate900,
                       tooltip: 'Voltar',
-                      padding: EdgeInsets.zero,
+                      style: IconButton.styleFrom(hoverColor: _slate100),
                     ),
                     const SizedBox(width: 8),
                     Expanded(
@@ -200,28 +197,19 @@ class _HistoricoDraftDetailScreenState
                         children: [
                           Text(
                             widget.nomeLista,
-                            style: const TextStyle(
-                                fontSize: 22, fontWeight: FontWeight.bold),
+                            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: _slate900, letterSpacing: -0.5),
                           ),
                           const SizedBox(height: 6),
                           Wrap(
                             spacing: 16,
-                            runSpacing: 4,
+                            runSpacing: 6,
                             children: [
-                              _metaChip(
-                                  Icons.calendar_today_outlined,
-                                  'Criado em ${widget.createdAt}'),
-                              if (widget.createdByEmail != null &&
-                                  widget.createdByEmail!.isNotEmpty)
-                                _metaChip(Icons.person_outline,
-                                    widget.createdByEmail!),
-                              if (widget.reviewedByEmail != null &&
-                                  widget.reviewedByEmail!.isNotEmpty) ...[
-                                _metaChip(
-                                    Icons.rate_review_outlined,
-                                    '${_reviewLabel(widget.status)} em ${widget.reviewedAt}'),
-                                _metaChip(Icons.verified_user_outlined,
-                                    widget.reviewedByEmail!),
+                              _metaChip(Icons.calendar_today_outlined, 'Criado em ${widget.createdAt}'),
+                              if (widget.createdByEmail != null && widget.createdByEmail!.isNotEmpty)
+                                _metaChip(Icons.person_outline_rounded, widget.createdByEmail!),
+                              if (widget.reviewedByEmail != null && widget.reviewedByEmail!.isNotEmpty) ...[
+                                _metaChip(Icons.rate_review_outlined, '${_reviewLabel(widget.status)} em ${widget.reviewedAt}'),
+                                _metaChip(Icons.verified_user_outlined, widget.reviewedByEmail!),
                               ],
                             ],
                           ),
@@ -229,30 +217,22 @@ class _HistoricoDraftDetailScreenState
                       ),
                     ),
                     const SizedBox(width: 16),
-                    // Badge de status
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 7),
-                      decoration: BoxDecoration(
-                        color: statusBg,
-                        borderRadius: BorderRadius.circular(20),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                      decoration: BoxDecoration(color: statusBg, borderRadius: BorderRadius.circular(8)),
+                      child: Text(
+                        statusLabel,
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: statusFg, letterSpacing: 0.3),
                       ),
-                      child: Text(statusLabel,
-                          style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: statusFg)),
                     ),
                   ],
                 ),
               ],
             ),
           ),
-
-          // ── Corpo ────────────────────────────────────────────────────────
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? const Center(child: CircularProgressIndicator(color: _laranja))
                 : _erro.isNotEmpty
                     ? _erroWidget()
                     : _corpo(),
@@ -269,18 +249,17 @@ class _HistoricoDraftDetailScreenState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // KPIs + Regras
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+          padding: const EdgeInsets.fromLTRB(32, 20, 32, 0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _KpiRow(kpis: kpis),
               if (_resumo.isNotEmpty) ...[
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 _RegrasBox(texto: _resumo),
               ],
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               _FiltrosBarra(
                 materiais: _materiais,
                 filtroTab: _filtroTab,
@@ -291,12 +270,9 @@ class _HistoricoDraftDetailScreenState
             ],
           ),
         ),
-        const SizedBox(height: 8),
-
-        // Tabela
         Expanded(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+            padding: const EdgeInsets.fromLTRB(32, 12, 32, 24),
             child: _TabelaDetalhe(
               grupos: grupos,
               listasExpandidas: _listasExpandidas,
@@ -304,9 +280,7 @@ class _HistoricoDraftDetailScreenState
               busca: _busca,
               filtroTab: _filtroTab,
               onToggle: (k) => setState(() {
-                _listasExpandidas.contains(k)
-                    ? _listasExpandidas.remove(k)
-                    : _listasExpandidas.add(k);
+                _listasExpandidas.contains(k) ? _listasExpandidas.remove(k) : _listasExpandidas.add(k);
               }),
             ),
           ),
@@ -320,23 +294,16 @@ class _HistoricoDraftDetailScreenState
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.error_outline, size: 48, color: Colors.red.shade300),
+          Icon(Icons.error_outline_rounded, size: 44, color: Colors.red.shade400),
           const SizedBox(height: 12),
-          Text('Erro ao carregar detalhes',
-              style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: Colors.grey.shade700,
-                  fontSize: 16)),
-          const SizedBox(height: 6),
-          Text(_erro,
-              style:
-                  TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+          const Text('Erro ao carregar detalhes', style: TextStyle(fontWeight: FontWeight.w800, color: _slate900, fontSize: 16)),
+          const SizedBox(height: 4),
+          Text(_erro, style: const TextStyle(fontSize: 12, color: _slate600)),
           const SizedBox(height: 16),
           ElevatedButton(
             onPressed: _carregar,
-            style: ElevatedButton.styleFrom(
-                backgroundColor: _laranja, foregroundColor: Colors.white),
-            child: const Text('Tentar novamente'),
+            style: ElevatedButton.styleFrom(backgroundColor: _laranja, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+            child: const Text('Tentar novamente', style: TextStyle(fontWeight: FontWeight.w700)),
           ),
         ],
       ),
@@ -347,10 +314,9 @@ class _HistoricoDraftDetailScreenState
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 13, color: Colors.grey.shade500),
-        const SizedBox(width: 4),
-        Text(label,
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+        Icon(icon, size: 14, color: _slate600),
+        const SizedBox(width: 6),
+        Text(label, style: const TextStyle(fontSize: 12, color: _slate600, fontWeight: FontWeight.w500)),
       ],
     );
   }
@@ -362,9 +328,6 @@ class _HistoricoDraftDetailScreenState
       };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// KPI row
-// ─────────────────────────────────────────────────────────────────────────────
 class _KpisSummary {
   final int total, alterados, semAlteracao, excecoes, listasFilhas;
   _KpisSummary({
@@ -378,79 +341,59 @@ class _KpisSummary {
 
 class _KpiRow extends StatelessWidget {
   static const _laranja = Color(0xFFFF6B00);
+  static const _slate600 = Color(0xFF475569);
+  static const _slate200 = Color(0xFFE2E8F0);
   final _KpisSummary kpis;
   const _KpiRow({required this.kpis});
 
   @override
   Widget build(BuildContext context) {
-    final pctAlt =
-        kpis.total > 0 ? kpis.alterados / kpis.total * 100 : 0.0;
-    final pctSem =
-        kpis.total > 0 ? kpis.semAlteracao / kpis.total * 100 : 0.0;
+    final pctAlt = kpis.total > 0 ? kpis.alterados / kpis.total * 100 : 0.0;
+    final pctSem = kpis.total > 0 ? kpis.semAlteracao / kpis.total * 100 : 0.0;
 
     return Row(
       children: [
-        Expanded(
-            child: _card(Icons.inventory_2_outlined, 'Total',
-                '${kpis.total}', 'materiais', Colors.blue.shade600)),
-        const SizedBox(width: 10),
-        Expanded(
-            child: _card(Icons.edit_outlined, 'Alterados',
-                '${kpis.alterados}', '${pctAlt.toStringAsFixed(1)}%', _laranja)),
-        const SizedBox(width: 10),
-        Expanded(
-            child: _card(Icons.remove_circle_outline, 'Sem alteração',
-                '${kpis.semAlteracao}', '${pctSem.toStringAsFixed(1)}%',
-                Colors.grey.shade600)),
-        const SizedBox(width: 10),
-        Expanded(
-            child: _card(Icons.rule_outlined, 'Exceções',
-                '${kpis.excecoes}', '${kpis.listasFilhas} listas filhas',
-                Colors.purple.shade600)),
+        Expanded(child: _card(Icons.inventory_2_outlined, 'Total', '${kpis.total}', 'materiais avaliados', Colors.blue.shade600)),
+        const SizedBox(width: 12),
+        Expanded(child: _card(Icons.edit_document, 'Alterados', '${kpis.alterados}', '${pctAlt.toStringAsFixed(1)}% do lote', _laranja)),
+        const SizedBox(width: 12),
+        Expanded(child: _card(Icons.remove_circle_outline_rounded, 'Sem alteração', '${kpis.semAlteracao}', '${pctSem.toStringAsFixed(1)}% mantidos', _slate600)),
+        const SizedBox(width: 12),
+        Expanded(child: _card(Icons.rule_folder_outlined, 'Exceções', '${kpis.excecoes}', '${kpis.listasFilhas} sub-listas filhas', Colors.purple.shade600)),
       ],
     );
   }
 
-  static Widget _card(
-      IconData icon, String label, String valor, String sub, Color cor) {
+  static Widget _card(IconData icon, String label, String valor, String sub, Color cor) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.grey.shade200),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _slate200),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(children: [
             Icon(icon, size: 16, color: cor),
-            const SizedBox(width: 6),
-            Expanded(
-                child: Text(label,
-                    style: TextStyle(
-                        fontSize: 11, color: Colors.grey.shade600),
-                    overflow: TextOverflow.ellipsis)),
+            const SizedBox(width: 8),
+            Expanded(child: Text(label, style: const TextStyle(fontSize: 11, color: _slate600, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
           ]),
-          const SizedBox(height: 8),
-          Text(valor,
-              style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: cor)),
-          Text(sub,
-              style:
-                  TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+          const SizedBox(height: 6),
+          Text(valor, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: cor, letterSpacing: -0.5)),
+          Text(sub, style: const TextStyle(fontSize: 10, color: _slate600, fontWeight: FontWeight.w500)),
         ],
       ),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Regras box
-// ─────────────────────────────────────────────────────────────────────────────
 class _RegrasBox extends StatelessWidget {
+  static const _laranja = Color(0xFFFF6B00);
+  static const _slate900 = Color(0xFF0F172A);
+  static const _slate600 = Color(0xFF475569);
+  static const _slate200 = Color(0xFFE2E8F0);
   final String texto;
   const _RegrasBox({required this.texto});
 
@@ -461,27 +404,28 @@ class _RegrasBox extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.grey.shade200),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _slate200),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: [
-            Icon(Icons.info_outline, size: 16, color: Colors.grey.shade600),
-            const SizedBox(width: 6),
-            const Text('Regras aplicadas',
-                style: TextStyle(
-                    fontWeight: FontWeight.w700, fontSize: 13)),
+          const Row(children: [
+            Icon(Icons.info_outline_rounded, size: 16, color: _slate600),
+            const SizedBox(width: 8),
+            Text('Parâmetros e Regras de Negócio Aplicadas', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: _slate900)),
           ]),
           const SizedBox(height: 10),
           ...linhas.map((l) => Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Text(l,
-                    style: TextStyle(
-                        fontSize: 12,
-                        height: 1.4,
-                        color: Colors.grey.shade700)),
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Padding(padding: EdgeInsets.only(top: 6), child: Icon(Icons.circle, size: 4, color: _laranja)),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(l, style: const TextStyle(fontSize: 12, height: 1.4, color: _slate600, fontWeight: FontWeight.w500))),
+                  ],
+                ),
               )),
         ],
       ),
@@ -489,11 +433,12 @@ class _RegrasBox extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Filtros e busca
-// ─────────────────────────────────────────────────────────────────────────────
 class _FiltrosBarra extends StatelessWidget {
   static const _laranja = Color(0xFFFF6B00);
+  static const _slate600 = Color(0xFF475569);
+  static const _slate400 = Color(0xFF94A3B8);
+  static const _slate200 = Color(0xFFE2E8F0);
+  static const _bgSuave = Color(0xFFF8FAFC);
   final List<Map<String, dynamic>> materiais;
   final String filtroTab;
   final String busca;
@@ -519,20 +464,17 @@ class _FiltrosBarra extends StatelessWidget {
   Widget build(BuildContext context) {
     final tabs = [
       ('todos', 'Todos', materiais.length),
-      ('alterados', 'Alterados',
-          materiais.where((m) => m['foi_editado'] == true).length),
-      ('sem_alteracao', 'Sem alteração',
-          materiais.where((m) => m['foi_editado'] != true).length),
-      ('excecoes', 'Exceções',
-          materiais.where((m) => _statusLabel(m) == 'Exceção manual').length),
+      ('alterados', 'Alterados', materiais.where((m) => m['foi_editado'] == true).length),
+      ('sem_alteracao', 'Sem alteração', materiais.where((m) => m['foi_editado'] != true).length),
+      ('excecoes', 'Exceções', materiais.where((m) => _statusLabel(m) == 'Exceção manual').length),
     ];
 
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.grey.shade200),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _slate200),
       ),
       child: Row(
         children: [
@@ -544,47 +486,46 @@ class _FiltrosBarra extends StatelessWidget {
                 label: Text('${t.$2} (${t.$3})'),
                 selected: active,
                 onSelected: (_) => onFiltroTab(t.$1),
-                selectedColor: _laranja.withOpacity(0.12),
+                selectedColor: _laranja.withOpacity(0.08),
                 checkmarkColor: _laranja,
                 showCheckmark: false,
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                 labelStyle: TextStyle(
                   fontSize: 12,
-                  fontWeight:
-                      active ? FontWeight.w600 : FontWeight.normal,
-                  color: active ? _laranja : Colors.grey.shade700,
+                  fontWeight: active ? FontWeight.w700 : FontWeight.w600,
+                  color: active ? _laranja : _slate600,
                 ),
                 side: BorderSide(
-                  color: active
-                      ? _laranja.withOpacity(0.4)
-                      : Colors.grey.shade300,
+                  color: active ? _laranja.withOpacity(0.5) : _slate200,
+                  width: active ? 1.5 : 1,
                 ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
             );
           }),
           const Spacer(),
           SizedBox(
-            width: 260,
-            height: 38,
+            width: 280,
+            height: 40,
             child: TextField(
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
               decoration: InputDecoration(
                 hintText: 'Buscar código ou material...',
-                hintStyle: TextStyle(
-                    fontSize: 12, color: Colors.grey.shade400),
-                prefixIcon: Icon(Icons.search,
-                    size: 18, color: Colors.grey.shade400),
+                hintStyle: const TextStyle(fontSize: 12, color: _slate400, fontWeight: FontWeight.w500),
+                prefixIcon: const Icon(Icons.search_rounded, size: 18, color: _slate600),
                 isDense: true,
-                contentPadding:
-                    const EdgeInsets.symmetric(vertical: 0),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
+                filled: true,
+                fillColor: _bgSuave,
+                contentPadding: const EdgeInsets.symmetric(vertical: 0),
                 enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: _slate200),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: _laranja, width: 1.5),
                 ),
               ),
-              style: const TextStyle(fontSize: 13),
               onChanged: onBusca,
             ),
           ),
@@ -594,10 +535,10 @@ class _FiltrosBarra extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tabela de detalhe com grupos expansíveis
-// ─────────────────────────────────────────────────────────────────────────────
 class _TabelaDetalhe extends StatelessWidget {
+  static const _slate200 = Color(0xFFE2E8F0);
+  static const _bgSuave = Color(0xFFF8FAFC);
+  static const _slate600 = Color(0xFF475569);
   final List<MapEntry<String, List<Map<String, dynamic>>>> grupos;
   final Set<String> listasExpandidas;
   final List<Map<String, dynamic>> Function(List<Map<String, dynamic>>) filtrar;
@@ -620,12 +561,11 @@ class _TabelaDetalhe extends StatelessWidget {
       return Container(
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.grey.shade200),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _slate200),
         ),
-        child: Center(
-          child: Text('Nenhum material encontrado.',
-              style: TextStyle(color: Colors.grey.shade500)),
+        child: const Center(
+          child: Text('Nenhum material encontrado no rascunho.', style: TextStyle(color: _slate600, fontWeight: FontWeight.w500)),
         ),
       );
     }
@@ -633,23 +573,20 @@ class _TabelaDetalhe extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.grey.shade200),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _slate200),
       ),
       clipBehavior: Clip.antiAlias,
       child: ListView(
+        padding: EdgeInsets.zero,
         children: [
           _cabecalho(),
           ...grupos.map((entry) {
             final chave = entry.key;
             final grupo = entry.value;
             final filtrados = filtrar(grupo);
-            if (filtrados.isEmpty && busca.isNotEmpty) {
-              return const SizedBox.shrink();
-            }
-            if (filtrados.isEmpty &&
-                filtroTab != 'todos' &&
-                filtroTab != 'sem_alteracao') {
+            if (filtrados.isEmpty && busca.isNotEmpty) return const SizedBox.shrink();
+            if (filtrados.isEmpty && filtroTab != 'todos' && filtroTab != 'sem_alteracao') {
               return const SizedBox.shrink();
             }
             return _GrupoExpansivel(
@@ -667,42 +604,39 @@ class _TabelaDetalhe extends StatelessWidget {
 
   static Widget _cabecalho() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      color: Colors.grey.shade50,
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+      color: _bgSuave,
       child: Row(
         children: [
           _th('Código', flex: 2),
-          _th('Material', flex: 5),
-          _th('Lista', flex: 3),
-          _th('Preço anterior', flex: 2, align: TextAlign.right),
-          _th('Preço atual', flex: 2, align: TextAlign.right),
+          _th('Material / Descrição', flex: 5),
+          _th('Vínculo', flex: 3),
+          _th('Preço Anterior', flex: 2, align: TextAlign.right),
+          _th('Preço Atual', flex: 2, align: TextAlign.right),
           _th('Dif. R\$', flex: 2, align: TextAlign.right),
           _th('Dif. %', flex: 2, align: TextAlign.right),
-          _th('Status', flex: 3, align: TextAlign.center),
+          _th('Resultado', flex: 3, align: TextAlign.center),
         ],
       ),
     );
   }
 
-  static Widget _th(String label,
-      {required int flex, TextAlign align = TextAlign.left}) {
+  static Widget _th(String label, {required int flex, TextAlign align = TextAlign.left}) {
     return Expanded(
       flex: flex,
       child: Text(label,
           textAlign: align,
-          style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: Colors.grey.shade600)),
+          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: _slate600, letterSpacing: 0.3)),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Grupo expansível
-// ─────────────────────────────────────────────────────────────────────────────
 class _GrupoExpansivel extends StatelessWidget {
   static const _laranja = Color(0xFFFF6B00);
+  static const _slate900 = Color(0xFF0F172A);
+  static const _slate600 = Color(0xFF475569);
+  static const _slate200 = Color(0xFFE2E8F0);
+  static const _slate100 = Color(0xFFF1F5F9);
   final String chave;
   final List<Map<String, dynamic>> grupo;
   final List<Map<String, dynamic>> filtrados;
@@ -728,56 +662,33 @@ class _GrupoExpansivel extends StatelessWidget {
     return Column(
       children: [
         Material(
-          color: expandido ? cor.withOpacity(0.04) : Colors.grey.shade50,
+          color: expandido ? cor.withOpacity(0.04) : _slate100.withOpacity(0.4),
           child: InkWell(
             onTap: onToggle,
             child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               child: Row(
                 children: [
-                  Icon(
-                    expandido
-                        ? Icons.keyboard_arrow_down
-                        : Icons.keyboard_arrow_right,
-                    size: 20,
-                    color: cor,
-                  ),
+                  Icon(expandido ? Icons.keyboard_arrow_down_rounded : Icons.keyboard_arrow_right_rounded, size: 20, color: cor),
                   const SizedBox(width: 8),
-                  Icon(
-                    tipoLista == 'mae'
-                        ? Icons.table_chart_outlined
-                        : Icons.account_tree_outlined,
-                    size: 16,
-                    color: cor,
-                  ),
+                  Icon(tipoLista == 'mae' ? Icons.table_chart_outlined : Icons.account_tree_outlined, size: 16, color: cor),
                   const SizedBox(width: 8),
                   Text(
-                    tipoLista == 'mae' ? 'Lista mãe' : 'Lista filha',
-                    style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: cor),
+                    tipoLista == 'mae' ? 'Lista Mãe' : 'Lista Filha',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: cor, letterSpacing: 0.3),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 12),
                   Expanded(
-                    child: Text(nomeLista,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w700, fontSize: 13),
-                        overflow: TextOverflow.ellipsis),
+                    child: Text(nomeLista, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: _slate900), overflow: TextOverflow.ellipsis),
                   ),
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey.shade200),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: _slate200),
                     ),
-                    child: Text('$alterados/${grupo.length} alterados',
-                        style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey.shade600)),
+                    child: Text('$alterados/${grupo.length} alterados', style: const TextStyle(fontSize: 11, color: _slate600, fontWeight: FontWeight.w600)),
                   ),
                 ],
               ),
@@ -786,26 +697,24 @@ class _GrupoExpansivel extends StatelessWidget {
         ),
         if (expandido) ...[
           if (filtrados.isEmpty)
-            Padding(
-              padding: const EdgeInsets.all(24),
-              child: Text('Nenhum material neste filtro.',
-                  style: TextStyle(
-                      color: Colors.grey.shade500, fontSize: 12)),
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Text('Nenhum material correspondente nesta ramificação.', style: TextStyle(color: _slate600, fontSize: 12, fontWeight: FontWeight.w500)),
             )
           else
             ...filtrados.map((item) => _LinhaItem(item: item)),
         ],
-        Divider(height: 1, color: Colors.grey.shade100),
+        const Divider(height: 1, color: _slate100),
       ],
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Linha de material
-// ─────────────────────────────────────────────────────────────────────────────
 class _LinhaItem extends StatelessWidget {
   static const _laranja = Color(0xFFFF6B00);
+  static const _slate900 = Color(0xFF0F172A);
+  static const _slate600 = Color(0xFF475569);
+  static const _slate100 = Color(0xFFF1F5F9);
   final Map<String, dynamic> item;
   const _LinhaItem({required this.item});
 
@@ -830,116 +739,56 @@ class _LinhaItem extends StatelessWidget {
     final status = _statusLabel(item);
     final alterado = item['foi_editado'] == true;
 
-    final difColor = dif > 0
-        ? Colors.green.shade700
-        : dif < 0
-            ? Colors.red.shade600
-            : Colors.grey.shade500;
+    final difColor = dif > 0 ? const Color(0xFF047857) : dif < 0 ? const Color(0xFFB91C1C) : _slate600;
 
     return Container(
       decoration: BoxDecoration(
-        color: alterado ? _laranja.withOpacity(0.02) : null,
-        border: Border(bottom: BorderSide(color: Colors.grey.shade100)),
+        color: alterado ? _laranja.withOpacity(0.015) : null,
+        border: const Border(bottom: BorderSide(color: _slate100)),
       ),
-      padding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          _td(item['product_id'].toString(),
-              flex: 2,
-              style: TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 12,
-                  color: Colors.grey.shade700)),
-          _td(item['description'].toString(),
-              flex: 5,
-              style: const TextStyle(
-                  fontSize: 12, fontWeight: FontWeight.w500)),
-          _td(item['lista_nome'].toString(),
-              flex: 3,
-              style:
-                  TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-          _td(_fmt(antigo),
-              flex: 2,
-              align: TextAlign.right,
-              style: TextStyle(
-                fontSize: 12,
-                color: alterado
-                    ? Colors.grey.shade500
-                    : Colors.grey.shade800,
-                decoration:
-                    alterado ? TextDecoration.lineThrough : null,
-              )),
-          _td(_fmt(novo),
-              flex: 2,
-              align: TextAlign.right,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight:
-                    alterado ? FontWeight.bold : FontWeight.normal,
-                color: alterado
-                    ? Colors.grey.shade900
-                    : Colors.grey.shade700,
-              )),
-          _td('${dif >= 0 ? '+' : ''}${_fmt(dif)}',
-              flex: 2,
-              align: TextAlign.right,
-              style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: difColor)),
-          _td(
-              '${pct >= 0 ? '+' : ''}${pct.toStringAsFixed(2)}%',
-              flex: 2,
-              align: TextAlign.right,
-              style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: difColor)),
+          _td(item['product_id'].toString(), flex: 2, style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: _slate600, fontWeight: FontWeight.w600)),
+          _td(item['description'].toString(), flex: 5, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _slate900)),
+          _td(item['lista_nome'].toString(), flex: 3, style: const TextStyle(fontSize: 11, color: _slate600, fontWeight: FontWeight.w500)),
+          _td(_fmt(antigo), flex: 2, align: TextAlign.right, style: TextStyle(fontSize: 12, color: alterado ? _slate600 : _slate900, decoration: alterado ? TextDecoration.lineThrough : null, fontWeight: FontWeight.w500)),
+          _td(_fmt(novo), flex: 2, align: TextAlign.right, style: TextStyle(fontSize: 12, fontWeight: alterado ? FontWeight.w900 : FontWeight.w600, color: alterado ? _slate900 : _slate600)),
+          _td('${dif >= 0 ? '+' : ''}${_fmt(dif)}', flex: 2, align: TextAlign.right, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: difColor)),
+          _td('${pct >= 0 ? '+' : ''}${pct.toStringAsFixed(2)}%', flex: 2, align: TextAlign.right, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: difColor)),
           Expanded(flex: 3, child: Center(child: _Badge(status: status))),
         ],
       ),
     );
   }
 
-  static Widget _td(String text,
-      {required int flex,
-      TextAlign align = TextAlign.left,
-      TextStyle? style}) {
+  static Widget _td(String text, {required int flex, TextAlign align = TextAlign.left, TextStyle? style}) {
     return Expanded(
       flex: flex,
-      child: Text(text,
-          textAlign: align,
-          style: style ?? const TextStyle(fontSize: 12),
-          overflow: TextOverflow.ellipsis,
-          maxLines: 2),
+      child: Text(text, textAlign: align, style: style, overflow: TextOverflow.ellipsis, maxLines: 2),
     );
   }
 }
 
 class _Badge extends StatelessWidget {
-  static const _laranja = Color(0xFFFF6B00);
   final String status;
   const _Badge({required this.status});
 
   @override
   Widget build(BuildContext context) {
     final (bg, fg) = switch (status) {
-      'Alterado' => (Colors.green.shade50, Colors.green.shade700),
-      'Exceção manual' => (_laranja.withOpacity(0.12), _laranja),
-      _ => (Colors.grey.shade100, Colors.grey.shade600),
+      'Alterado' => (const Color(0xFFECFDF5), const Color(0xFF047857)),
+      'Exceção manual' => (const Color(0xFFF3E8FF), const Color(0xFF7E22CE)),
+      _ => (const Color(0xFFF1F5F9), const Color(0xFF475569)),
     };
     return Container(
-      padding:
-          const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-          color: bg, borderRadius: BorderRadius.circular(20)),
-      child: Text(status,
-          style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: fg)),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(6)),
+      child: Text(
+        status,
+        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: fg, letterSpacing: 0.1),
+      ),
     );
   }
 }
