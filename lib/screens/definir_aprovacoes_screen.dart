@@ -3,7 +3,6 @@
 import 'package:flutter/material.dart';
 import 'package:pole_price/models/draft_aprova_model.dart';
 import 'package:pole_price/service/draft_pricing_service.dart';
-import 'package:pole_price/widgets/sidebar.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -56,16 +55,18 @@ class _AprovacoesScreenState extends State<AprovacoesScreen> {
           .eq('status', 'pending')
           .order('created_at', ascending: false);
 
-      final lista =
-          (response as List).map((j) => DraftAprovacao.fromJson(j)).toList();
+      final lista = (response as List)
+          .map((j) => DraftAprovacao.fromJson(j))
+          .toList();
 
       setState(() => _rascunhosPendentes = lista);
 
       final idInicial = widget.draftIdInicial;
       if (idInicial != null && mounted) {
-        final draft = lista
-            .cast<DraftAprovacao?>()
-            .firstWhere((d) => d?.id == idInicial, orElse: () => null);
+        final draft = lista.cast<DraftAprovacao?>().firstWhere(
+          (d) => d?.id == idInicial,
+          orElse: () => null,
+        );
         if (draft != null) await _carregarDetalhesRascunho(draft);
       }
     } catch (e) {
@@ -109,10 +110,13 @@ class _AprovacoesScreenState extends State<AprovacoesScreen> {
       final qtd = await _draftService.applyDraft(draftId);
 
       // Salva quem aprovou
-      await Supabase.instance.client.from('price_drafts').update({
-        'reviewed_by_email': reviewerEmail,
-        'reviewed_at': DateTime.now().toIso8601String(),
-      }).eq('id', draftId);
+      await Supabase.instance.client
+          .from('price_drafts')
+          .update({
+            'reviewed_by_email': reviewerEmail,
+            'reviewed_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', draftId);
 
       _snack('$qtd preço(s) publicados com sucesso.', Colors.green);
       _limparSelecao();
@@ -131,11 +135,14 @@ class _AprovacoesScreenState extends State<AprovacoesScreen> {
       final reviewerEmail =
           Supabase.instance.client.auth.currentUser?.email ?? 'desconhecido';
 
-      await Supabase.instance.client.from('price_drafts').update({
-        'status': 'rejected',
-        'reviewed_by_email': reviewerEmail,
-        'reviewed_at': DateTime.now().toIso8601String(),
-      }).eq('id', _rascunhoSelecionado!.id);
+      await Supabase.instance.client
+          .from('price_drafts')
+          .update({
+            'status': 'rejected',
+            'reviewed_by_email': reviewerEmail,
+            'reviewed_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', _rascunhoSelecionado!.id);
 
       _snack('Rascunho rejeitado.', Colors.orange);
       _limparSelecao();
@@ -151,26 +158,27 @@ class _AprovacoesScreenState extends State<AprovacoesScreen> {
 
   void _snack(String msg, Color cor) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: cor),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: cor));
   }
 
   void _limparSelecao() => setState(() {
-        _rascunhoSelecionado = null;
-        _materiais.clear();
-        _detalheCabecalho = '';
-        _listasExpandidas.clear();
-      });
+    _rascunhoSelecionado = null;
+    _materiais.clear();
+    _detalheCabecalho = '';
+    _listasExpandidas.clear();
+  });
 
   void _toggleLista(String chave) => setState(() {
-        _listasExpandidas.contains(chave)
-            ? _listasExpandidas.remove(chave)
-            : _listasExpandidas.add(chave);
-      });
+    _listasExpandidas.contains(chave)
+        ? _listasExpandidas.remove(chave)
+        : _listasExpandidas.add(chave);
+  });
 
   List<Map<String, dynamic>> _materiaisFiltrados(
-      List<Map<String, dynamic>> grupo) {
+    List<Map<String, dynamic>> grupo,
+  ) {
     return grupo.where((item) {
       final status = _statusLabel(item);
       final matchTab = switch (_filtroTab) {
@@ -197,23 +205,23 @@ class _AprovacoesScreenState extends State<AprovacoesScreen> {
   }
 
   List<MapEntry<String, List<Map<String, dynamic>>>> _gruposOrdenados() {
-    return _agruparPorLista().entries.toList()
-      ..sort((a, b) {
-        final aMae = a.value.first['tipo_lista'] == 'mae';
-        final bMae = b.value.first['tipo_lista'] == 'mae';
-        if (aMae && !bMae) return -1;
-        if (!aMae && bMae) return 1;
-        return a.value.first['lista_nome']
-            .toString()
-            .compareTo(b.value.first['lista_nome'].toString());
-      });
+    return _agruparPorLista().entries.toList()..sort((a, b) {
+      final aMae = a.value.first['tipo_lista'] == 'mae';
+      final bMae = b.value.first['tipo_lista'] == 'mae';
+      if (aMae && !bMae) return -1;
+      if (!aMae && bMae) return 1;
+      return a.value.first['lista_nome'].toString().compareTo(
+        b.value.first['lista_nome'].toString(),
+      );
+    });
   }
 
   _KpiData _calcularKpis() {
     final total = _materiais.length;
     final alterados = _materiais.where((m) => m['foi_editado'] == true).length;
-    final excecoes =
-        _materiais.where((m) => _statusLabel(m) == 'Exceção manual').length;
+    final excecoes = _materiais
+        .where((m) => _statusLabel(m) == 'Exceção manual')
+        .length;
     return _KpiData(
       total: total,
       alterados: alterados,
@@ -235,45 +243,37 @@ class _AprovacoesScreenState extends State<AprovacoesScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6F8),
       body: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Sidebar(paginaAtiva: 'aprovacoes'),
+          _PainelRascunhos(
+            loading: _loadingDrafts,
+            rascunhos: _rascunhosPendentes,
+            selecionado: _rascunhoSelecionado,
+            onSelecionar: _carregarDetalhesRascunho,
+          ),
           Expanded(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _PainelRascunhos(
-                  loading: _loadingDrafts,
-                  rascunhos: _rascunhosPendentes,
-                  selecionado: _rascunhoSelecionado,
-                  onSelecionar: _carregarDetalhesRascunho,
-                ),
-                Expanded(
-                  child: _rascunhoSelecionado == null
-                      ? const _EstadoVazio()
-                      : _loadingDetalhes
-                          ? const Center(child: CircularProgressIndicator())
-                          : _PainelDetalhes(
-                              draft: _rascunhoSelecionado!,
-                              materiais: _materiais,
-                              detalheCabecalho: _detalheCabecalho,
-                              filtroTab: _filtroTab,
-                              busca: _busca,
-                              listasExpandidas: _listasExpandidas,
-                              kpis: kpis,
-                              aprovando: _aprovando,
-                              countListasFilhas: _countListasFilhas(),
-                              gruposOrdenados: _gruposOrdenados(),
-                              materiaisFiltrados: _materiaisFiltrados,
-                              onAprovar: _aprovarRascunho,
-                              onRejeitar: _rejeitarRascunho,
-                              onToggleLista: _toggleLista,
-                              onFiltroTab: (v) =>
-                                  setState(() => _filtroTab = v),
-                              onBusca: (v) => setState(() => _busca = v),
-                            ),
-                ),
-              ],
-            ),
+            child: _rascunhoSelecionado == null
+                ? const _EstadoVazio()
+                : _loadingDetalhes
+                ? const Center(child: CircularProgressIndicator())
+                : _PainelDetalhes(
+                    draft: _rascunhoSelecionado!,
+                    materiais: _materiais,
+                    detalheCabecalho: _detalheCabecalho,
+                    filtroTab: _filtroTab,
+                    busca: _busca,
+                    listasExpandidas: _listasExpandidas,
+                    kpis: kpis,
+                    aprovando: _aprovando,
+                    countListasFilhas: _countListasFilhas(),
+                    gruposOrdenados: _gruposOrdenados(),
+                    materiaisFiltrados: _materiaisFiltrados,
+                    onAprovar: _aprovarRascunho,
+                    onRejeitar: _rejeitarRascunho,
+                    onToggleLista: _toggleLista,
+                    onFiltroTab: (v) => setState(() => _filtroTab = v),
+                    onBusca: (v) => setState(() => _busca = v),
+                  ),
           ),
         ],
       ),
@@ -341,27 +341,27 @@ class _PainelRascunhos extends StatelessWidget {
             child: loading
                 ? const Center(child: CircularProgressIndicator())
                 : rascunhos.isEmpty
-                    ? Center(
-                        child: Text(
-                          'Nenhum rascunho pendente.',
-                          style: TextStyle(color: Colors.grey.shade500),
-                        ),
-                      )
-                    : ListView.separated(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        itemCount: rascunhos.length,
-                        separatorBuilder: (_, __) =>
-                            Divider(height: 1, color: Colors.grey.shade100),
-                        itemBuilder: (_, i) {
-                          final d = rascunhos[i];
-                          final selected = selecionado?.id == d.id;
-                          return _DraftCard(
-                            draft: d,
-                            selected: selected,
-                            onTap: () => onSelecionar(d),
-                          );
-                        },
-                      ),
+                ? Center(
+                    child: Text(
+                      'Nenhum rascunho pendente.',
+                      style: TextStyle(color: Colors.grey.shade500),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    itemCount: rascunhos.length,
+                    separatorBuilder: (_, __) =>
+                        Divider(height: 1, color: Colors.grey.shade100),
+                    itemBuilder: (_, i) {
+                      final d = rascunhos[i];
+                      final selected = selecionado?.id == d.id;
+                      return _DraftCard(
+                        draft: d,
+                        selected: selected,
+                        onTap: () => onSelecionar(d),
+                      );
+                    },
+                  ),
           ),
         ],
       ),
@@ -459,7 +459,11 @@ class _EstadoVazio extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.fact_check_outlined, size: 56, color: Colors.grey.shade300),
+          Icon(
+            Icons.fact_check_outlined,
+            size: 56,
+            color: Colors.grey.shade300,
+          ),
           const SizedBox(height: 16),
           Text(
             'Selecione um rascunho para revisar',
@@ -497,7 +501,7 @@ class _PainelDetalhes extends StatelessWidget {
   final int countListasFilhas;
   final List<MapEntry<String, List<Map<String, dynamic>>>> gruposOrdenados;
   final List<Map<String, dynamic>> Function(List<Map<String, dynamic>>)
-      materiaisFiltrados;
+  materiaisFiltrados;
   final VoidCallback onAprovar;
   final VoidCallback onRejeitar;
   final void Function(String) onToggleLista;
@@ -540,10 +544,7 @@ class _PainelDetalhes extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (kpis != null)
-                _KpiCards(
-                  kpis: kpis!,
-                  countListasFilhas: countListasFilhas,
-                ),
+                _KpiCards(kpis: kpis!, countListasFilhas: countListasFilhas),
               if (detalheCabecalho.isNotEmpty) ...[
                 const SizedBox(height: 10),
                 _RegrasAplicadas(texto: detalheCabecalho),
@@ -606,11 +607,15 @@ class _Cabecalho extends StatelessWidget {
           // Breadcrumb
           Row(
             children: [
-              Text('Aprovações',
-                  style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
+              Text(
+                'Aprovações',
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
+              ),
               Icon(Icons.chevron_right, size: 16, color: Colors.grey.shade400),
-              Text(draft.masterListName,
-                  style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
+              Text(
+                draft.masterListName,
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -624,7 +629,9 @@ class _Cabecalho extends StatelessWidget {
                     Text(
                       'Aprovação de preços: ${draft.masterListName}',
                       style: const TextStyle(
-                          fontSize: 22, fontWeight: FontWeight.bold),
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     // Criado por + data
@@ -634,20 +641,27 @@ class _Cabecalho extends StatelessWidget {
                         Text(
                           'Criado em ${draft.createdAtFormatado}',
                           style: TextStyle(
-                              fontSize: 13, color: Colors.grey.shade600),
+                            fontSize: 13,
+                            color: Colors.grey.shade600,
+                          ),
                         ),
                         if (draft.createdByEmail != null &&
                             draft.createdByEmail!.isNotEmpty)
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.person_outline,
-                                  size: 14, color: Colors.grey.shade500),
+                              Icon(
+                                Icons.person_outline,
+                                size: 14,
+                                color: Colors.grey.shade500,
+                              ),
                               const SizedBox(width: 4),
                               Text(
                                 draft.createdByEmail!,
                                 style: TextStyle(
-                                    fontSize: 13, color: Colors.grey.shade600),
+                                  fontSize: 13,
+                                  color: Colors.grey.shade600,
+                                ),
                               ),
                             ],
                           ),
@@ -663,8 +677,10 @@ class _Cabecalho extends StatelessWidget {
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.red.shade700,
                   side: BorderSide(color: Colors.red.shade300),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 14,
+                  ),
                 ),
                 child: const Text('Rejeitar'),
               ),
@@ -676,15 +692,19 @@ class _Cabecalho extends StatelessWidget {
                         width: 16,
                         height: 16,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
                       )
                     : const Icon(Icons.check, size: 18),
                 label: Text(aprovando ? 'Aprovando...' : 'Aprovar e publicar'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _laranja,
                   foregroundColor: Colors.white,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 14,
+                  ),
                 ),
               ),
             ],
@@ -698,10 +718,13 @@ class _Cabecalho extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-          color: bg, borderRadius: BorderRadius.circular(20)),
-      child: Text(label,
-          style: TextStyle(
-              fontSize: 12, fontWeight: FontWeight.w600, color: fg)),
+        color: bg,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: fg),
+      ),
     );
   }
 }
@@ -723,18 +746,56 @@ class _KpiCards extends StatelessWidget {
 
     return Row(
       children: [
-        Expanded(child: _kpiCard(Icons.inventory_2_outlined, 'Total', '${kpis.total}', 'materiais', Colors.blue.shade600)),
+        Expanded(
+          child: _kpiCard(
+            Icons.inventory_2_outlined,
+            'Total',
+            '${kpis.total}',
+            'materiais',
+            Colors.blue.shade600,
+          ),
+        ),
         const SizedBox(width: 10),
-        Expanded(child: _kpiCard(Icons.edit_outlined, 'Alterados', '${kpis.alterados}', '${pctAlt.toStringAsFixed(1)}%', _laranja)),
+        Expanded(
+          child: _kpiCard(
+            Icons.edit_outlined,
+            'Alterados',
+            '${kpis.alterados}',
+            '${pctAlt.toStringAsFixed(1)}%',
+            _laranja,
+          ),
+        ),
         const SizedBox(width: 10),
-        Expanded(child: _kpiCard(Icons.remove_circle_outline, 'Sem alteração', '${kpis.semAlteracao}', '${pctSem.toStringAsFixed(1)}%', Colors.grey.shade600)),
+        Expanded(
+          child: _kpiCard(
+            Icons.remove_circle_outline,
+            'Sem alteração',
+            '${kpis.semAlteracao}',
+            '${pctSem.toStringAsFixed(1)}%',
+            Colors.grey.shade600,
+          ),
+        ),
         const SizedBox(width: 10),
-        Expanded(child: _kpiCard(Icons.rule_outlined, 'Exceções', '${kpis.excecoes}', '$countListasFilhas listas filhas', Colors.purple.shade600)),
+        Expanded(
+          child: _kpiCard(
+            Icons.rule_outlined,
+            'Exceções',
+            '${kpis.excecoes}',
+            '$countListasFilhas listas filhas',
+            Colors.purple.shade600,
+          ),
+        ),
       ],
     );
   }
 
-  static Widget _kpiCard(IconData icon, String label, String valor, String sub, Color cor) {
+  static Widget _kpiCard(
+    IconData icon,
+    String label,
+    String valor,
+    String sub,
+    Color cor,
+  ) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
@@ -745,14 +806,32 @@ class _KpiCards extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: [
-            Icon(icon, size: 16, color: cor),
-            const SizedBox(width: 6),
-            Expanded(child: Text(label, style: TextStyle(fontSize: 11, color: Colors.grey.shade600), overflow: TextOverflow.ellipsis)),
-          ]),
+          Row(
+            children: [
+              Icon(icon, size: 16, color: cor),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 8),
-          Text(valor, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: cor)),
-          Text(sub, style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+          Text(
+            valor,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: cor,
+            ),
+          ),
+          Text(
+            sub,
+            style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+          ),
         ],
       ),
     );
@@ -779,19 +858,30 @@ class _RegrasAplicadas extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: [
-            Icon(Icons.info_outline, size: 16, color: Colors.grey.shade600),
-            const SizedBox(width: 6),
-            const Text('Regras aplicadas',
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-          ]),
+          Row(
+            children: [
+              Icon(Icons.info_outline, size: 16, color: Colors.grey.shade600),
+              const SizedBox(width: 6),
+              const Text(
+                'Regras aplicadas',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+              ),
+            ],
+          ),
           const SizedBox(height: 10),
-          ...linhas.map((l) => Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Text(l,
-                    style: TextStyle(
-                        fontSize: 12, height: 1.4, color: Colors.grey.shade700)),
-              )),
+          ...linhas.map(
+            (l) => Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                l,
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.4,
+                  color: Colors.grey.shade700,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -828,9 +918,21 @@ class _FiltrosEBusca extends StatelessWidget {
   Widget build(BuildContext context) {
     final tabs = [
       ('todos', 'Todos', materiais.length),
-      ('alterados', 'Alterados', materiais.where((m) => m['foi_editado'] == true).length),
-      ('sem_alteracao', 'Sem alteração', materiais.where((m) => m['foi_editado'] != true).length),
-      ('excecoes', 'Exceções', materiais.where((m) => _statusLabel(m) == 'Exceção manual').length),
+      (
+        'alterados',
+        'Alterados',
+        materiais.where((m) => m['foi_editado'] == true).length,
+      ),
+      (
+        'sem_alteracao',
+        'Sem alteração',
+        materiais.where((m) => m['foi_editado'] != true).length,
+      ),
+      (
+        'excecoes',
+        'Exceções',
+        materiais.where((m) => _statusLabel(m) == 'Exceção manual').length,
+      ),
     ];
 
     return Container(
@@ -858,7 +960,9 @@ class _FiltrosEBusca extends StatelessWidget {
                   color: active ? _laranja : Colors.grey.shade700,
                 ),
                 side: BorderSide(
-                  color: active ? _laranja.withOpacity(0.4) : Colors.grey.shade300,
+                  color: active
+                      ? _laranja.withOpacity(0.4)
+                      : Colors.grey.shade300,
                 ),
                 showCheckmark: false,
               ),
@@ -872,7 +976,11 @@ class _FiltrosEBusca extends StatelessWidget {
               decoration: InputDecoration(
                 hintText: 'Buscar código ou material...',
                 hintStyle: TextStyle(fontSize: 12, color: Colors.grey.shade400),
-                prefixIcon: Icon(Icons.search, size: 18, color: Colors.grey.shade400),
+                prefixIcon: Icon(
+                  Icons.search,
+                  size: 18,
+                  color: Colors.grey.shade400,
+                ),
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(vertical: 0),
                 border: OutlineInputBorder(
@@ -903,7 +1011,8 @@ class _TabelaMateriais extends StatelessWidget {
   final Set<String> listasExpandidas;
   final String busca;
   final String filtroTab;
-  final List<Map<String, dynamic>> Function(List<Map<String, dynamic>>) materiaisFiltrados;
+  final List<Map<String, dynamic>> Function(List<Map<String, dynamic>>)
+  materiaisFiltrados;
   final void Function(String) onToggleLista;
 
   const _TabelaMateriais({
@@ -933,8 +1042,10 @@ class _TabelaMateriais extends StatelessWidget {
           border: Border.all(color: Colors.grey.shade200),
         ),
         child: Center(
-          child: Text('Nenhum material encontrado.',
-              style: TextStyle(color: Colors.grey.shade500)),
+          child: Text(
+            'Nenhum material encontrado.',
+            style: TextStyle(color: Colors.grey.shade500),
+          ),
         ),
       );
     }
@@ -993,12 +1104,22 @@ class _TabelaMateriais extends StatelessWidget {
     );
   }
 
-  static Widget _th(String label, {required int flex, TextAlign align = TextAlign.left}) {
+  static Widget _th(
+    String label, {
+    required int flex,
+    TextAlign align = TextAlign.left,
+  }) {
     return Expanded(
       flex: flex,
-      child: Text(label,
-          textAlign: align,
-          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.grey.shade600)),
+      child: Text(
+        label,
+        textAlign: align,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: Colors.grey.shade600,
+        ),
+      ),
     );
   }
 }
@@ -1041,34 +1162,57 @@ class _GrupoLista extends StatelessWidget {
               child: Row(
                 children: [
                   Icon(
-                    expandido ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right,
-                    size: 20, color: corTipo,
+                    expandido
+                        ? Icons.keyboard_arrow_down
+                        : Icons.keyboard_arrow_right,
+                    size: 20,
+                    color: corTipo,
                   ),
                   const SizedBox(width: 8),
                   Icon(
-                    tipoLista == 'mae' ? Icons.table_chart_outlined : Icons.account_tree_outlined,
-                    size: 16, color: corTipo,
+                    tipoLista == 'mae'
+                        ? Icons.table_chart_outlined
+                        : Icons.account_tree_outlined,
+                    size: 16,
+                    color: corTipo,
                   ),
                   const SizedBox(width: 8),
                   Text(
                     tipoLista == 'mae' ? 'Lista mãe' : 'Lista filha',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: corTipo),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: corTipo,
+                    ),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text(nomeLista,
-                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                        overflow: TextOverflow.ellipsis),
+                    child: Text(
+                      nomeLista,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: Colors.grey.shade200),
                     ),
-                    child: Text('$alteradosGrupo/${grupo.length} alterados',
-                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                    child: Text(
+                      '$alteradosGrupo/${grupo.length} alterados',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -1079,8 +1223,10 @@ class _GrupoLista extends StatelessWidget {
           if (filtrados.isEmpty)
             Padding(
               padding: const EdgeInsets.all(24),
-              child: Text('Nenhum material neste filtro.',
-                  style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+              child: Text(
+                'Nenhum material neste filtro.',
+                style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
+              ),
             )
           else
             ...filtrados.map((item) => _MaterialRow(item: item)),
@@ -1123,8 +1269,8 @@ class _MaterialRow extends StatelessWidget {
     final difColor = dif > 0
         ? Colors.green.shade700
         : dif < 0
-            ? Colors.red.shade600
-            : Colors.grey.shade500;
+        ? Colors.red.shade600
+        : Colors.grey.shade500;
 
     return Container(
       decoration: BoxDecoration(
@@ -1135,42 +1281,89 @@ class _MaterialRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          _td(item['product_id'].toString(), flex: 2,
-              style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: Colors.grey.shade700)),
-          _td(item['description'].toString(), flex: 5,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
-          _td(item['lista_nome'].toString(), flex: 3,
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-          _td(_fmtMoeda(antigo), flex: 2, align: TextAlign.right,
-              style: TextStyle(
-                fontSize: 12,
-                color: alterado ? Colors.grey.shade500 : Colors.grey.shade800,
-                decoration: alterado ? TextDecoration.lineThrough : null,
-              )),
-          _td(_fmtMoeda(novo), flex: 2, align: TextAlign.right,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: alterado ? FontWeight.bold : FontWeight.normal,
-                color: alterado ? Colors.grey.shade900 : Colors.grey.shade700,
-              )),
-          _td('${dif >= 0 ? '+' : ''}${_fmtMoeda(dif)}', flex: 2, align: TextAlign.right,
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: difColor)),
-          _td('${pct >= 0 ? '+' : ''}${pct.toStringAsFixed(2)}%', flex: 2, align: TextAlign.right,
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: difColor)),
-          Expanded(flex: 3, child: Center(child: _StatusBadge(status: status))),
+          _td(
+            item['product_id'].toString(),
+            flex: 2,
+            style: TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 12,
+              color: Colors.grey.shade700,
+            ),
+          ),
+          _td(
+            item['description'].toString(),
+            flex: 5,
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+          ),
+          _td(
+            item['lista_nome'].toString(),
+            flex: 3,
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+          ),
+          _td(
+            _fmtMoeda(antigo),
+            flex: 2,
+            align: TextAlign.right,
+            style: TextStyle(
+              fontSize: 12,
+              color: alterado ? Colors.grey.shade500 : Colors.grey.shade800,
+              decoration: alterado ? TextDecoration.lineThrough : null,
+            ),
+          ),
+          _td(
+            _fmtMoeda(novo),
+            flex: 2,
+            align: TextAlign.right,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: alterado ? FontWeight.bold : FontWeight.normal,
+              color: alterado ? Colors.grey.shade900 : Colors.grey.shade700,
+            ),
+          ),
+          _td(
+            '${dif >= 0 ? '+' : ''}${_fmtMoeda(dif)}',
+            flex: 2,
+            align: TextAlign.right,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: difColor,
+            ),
+          ),
+          _td(
+            '${pct >= 0 ? '+' : ''}${pct.toStringAsFixed(2)}%',
+            flex: 2,
+            align: TextAlign.right,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: difColor,
+            ),
+          ),
+          Expanded(
+            flex: 3,
+            child: Center(child: _StatusBadge(status: status)),
+          ),
         ],
       ),
     );
   }
 
-  static Widget _td(String text, {required int flex, TextAlign align = TextAlign.left, TextStyle? style}) {
+  static Widget _td(
+    String text, {
+    required int flex,
+    TextAlign align = TextAlign.left,
+    TextStyle? style,
+  }) {
     return Expanded(
       flex: flex,
-      child: Text(text,
-          textAlign: align,
-          style: style ?? const TextStyle(fontSize: 12),
-          overflow: TextOverflow.ellipsis,
-          maxLines: 2),
+      child: Text(
+        text,
+        textAlign: align,
+        style: style ?? const TextStyle(fontSize: 12),
+        overflow: TextOverflow.ellipsis,
+        maxLines: 2,
+      ),
     );
   }
 }
@@ -1189,9 +1382,14 @@ class _StatusBadge extends StatelessWidget {
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
-      child: Text(status,
-          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: fg)),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        status,
+        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: fg),
+      ),
     );
   }
 }
@@ -1201,7 +1399,12 @@ class _StatusBadge extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class _KpiData {
   final int total, alterados, semAlteracao, excecoes;
-  _KpiData({required this.total, required this.alterados, required this.semAlteracao, required this.excecoes});
+  _KpiData({
+    required this.total,
+    required this.alterados,
+    required this.semAlteracao,
+    required this.excecoes,
+  });
 }
 
 extension _DraftFormat on DraftAprovacao {

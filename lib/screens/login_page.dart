@@ -1,5 +1,7 @@
 // login_page.dart
 import 'package:flutter/material.dart';
+import 'package:pole_price/widgets/app_shell.dart';
+import 'package:pole_price/widgets/auth_guard.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:pole_price/screens/home_screen.dart';
@@ -29,7 +31,7 @@ class _LoginPageState extends State<LoginPage> {
       if (data.session != null) {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const HomeScreen()),
+          MaterialPageRoute(builder: (_) => const AuthGuard()),
         );
       }
     });
@@ -44,9 +46,11 @@ class _LoginPageState extends State<LoginPage> {
     try {
       await Supabase.instance.client.auth.signInWithOAuth(
         OAuthProvider.azure,
+
         // redirectTo aponta para o app em desenvolvimento.
         // Em produção, troca pelo domínio real.
-        redirectTo: 'http://localhost:3000',
+        // redirectTo: 'http://localhost:3000',
+        redirectTo: _redirectUrl,
         authScreenLaunchMode: LaunchMode.platformDefault,
         queryParams: {
           'tenant': 'a9c5de07-e6f6-4e5a-9094-56e82faf343e',
@@ -72,9 +76,7 @@ class _LoginPageState extends State<LoginPage> {
       body: LayoutBuilder(
         builder: (context, constraints) {
           if (constraints.maxWidth < 800) {
-            return SingleChildScrollView(
-              child: _buildMobileLayout(context),
-            );
+            return SingleChildScrollView(child: _buildMobileLayout(context));
           }
           return _buildDesktopLayout(context);
         },
@@ -180,12 +182,12 @@ class _LoginPageState extends State<LoginPage> {
               color: const Color(0xFFEF4444).withOpacity(0.08),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
-                  color: const Color(0xFFEF4444).withOpacity(0.3)),
+                color: const Color(0xFFEF4444).withOpacity(0.3),
+              ),
             ),
             child: Text(
               _erro!,
-              style: const TextStyle(
-                  color: Color(0xFFEF4444), fontSize: 13),
+              style: const TextStyle(color: Color(0xFFEF4444), fontSize: 13),
               textAlign: TextAlign.center,
             ),
           ),
@@ -199,7 +201,9 @@ class _LoginPageState extends State<LoginPage> {
             child: const Text(
               'Precisa de ajuda com o acesso corporativo?',
               style: TextStyle(
-                  fontSize: 13, decoration: TextDecoration.underline),
+                fontSize: 13,
+                decoration: TextDecoration.underline,
+              ),
             ),
           ),
         ),
@@ -227,8 +231,7 @@ class _LoginPageState extends State<LoginPage> {
           borderRadius: BorderRadius.circular(12),
           onTap: _loading ? null : _entrarComMicrosoft,
           child: Padding(
-            padding: const EdgeInsets.symmetric(
-                vertical: 16, horizontal: 24),
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -238,8 +241,7 @@ class _LoginPageState extends State<LoginPage> {
                     height: 20,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      valueColor:
-                          AlwaysStoppedAnimation<Color>(Colors.white),
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                     ),
                   )
                 else ...[
@@ -346,4 +348,12 @@ class _MicrosoftIconPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+String get _redirectUrl {
+  final host = Uri.base.host;
+  if (host == 'localhost') {
+    return 'http://localhost:3000';
+  }
+  return 'https://pole-price-c54ef.web.app/';
 }

@@ -3,7 +3,6 @@ import 'package:pole_price/controllers/preco_controller.dart';
 import 'package:pole_price/widgets/preco/painel_esquerdo.dart';
 import 'package:pole_price/widgets/preco/painel_direito.dart';
 import 'package:pole_price/widgets/preco/preco_topbar.dart';
-import 'package:pole_price/widgets/sidebar.dart';
 
 class PrecoScreen extends StatefulWidget {
   final String? filtroClusterId;
@@ -46,36 +45,29 @@ class _PrecoScreenState extends State<PrecoScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6F8),
-      body: Row(
+      body: Column(
         children: [
-          const Sidebar(paginaAtiva: 'precos'),
+          PrecoTopbar(controller: controller),
           Expanded(
-            child: Column(
-              children: [
-                PrecoTopbar(controller: controller),
-                Expanded(
-                  child: controller.loading
-                      ? const Center(child: CircularProgressIndicator())
-                      : Padding(
-                          padding: const EdgeInsets.all(20),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                flex: 3,
-                                child: PainelEsquerdo(controller: controller),
-                              ),
-                              const SizedBox(width: 20),
-                              SizedBox(
-                                width: 380,
-                                child: PainelDireito(controller: controller),
-                              ),
-                            ],
-                          ),
+            child: controller.loading
+                ? const Center(child: CircularProgressIndicator())
+                : Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: PainelEsquerdo(controller: controller),
                         ),
-                ),
-              ],
-            ),
+                        const SizedBox(width: 20),
+                        SizedBox(
+                          width: 380,
+                          child: PainelDireito(controller: controller),
+                        ),
+                      ],
+                    ),
+                  ),
           ),
         ],
       ),

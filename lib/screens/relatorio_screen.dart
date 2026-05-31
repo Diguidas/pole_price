@@ -4,7 +4,6 @@
 // de drafts aprovados (reviewed_at = data da mudança efetiva).
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:pole_price/widgets/sidebar.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Modelos internos
@@ -137,8 +136,7 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
       for (final d in drafts) {
         final rawDate = d['reviewed_at']?.toString();
         if (rawDate == null || rawDate == 'null') continue;
-        datasPorDraft[d['id'].toString()] =
-            DateTime.parse(rawDate).toLocal();
+        datasPorDraft[d['id'].toString()] = DateTime.parse(rawDate).toLocal();
       }
 
       final draftIds = datasPorDraft.keys.toList();
@@ -175,28 +173,27 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
         final data = datasPorDraft[draftId];
         if (data == null) continue;
 
-        porProduto.putIfAbsent(pid, () => []).add(
-          _PontoHistorico(
-            data: data,
-            preco: preco,
-            precoAnterior: precoAnterior,
-            draftId: draftId,
-          ),
-        );
+        porProduto
+            .putIfAbsent(pid, () => [])
+            .add(
+              _PontoHistorico(
+                data: data,
+                preco: preco,
+                precoAnterior: precoAnterior,
+                draftId: draftId,
+              ),
+            );
       }
 
       // 5. Ordena pontos por data e cria séries
-      final series = porProduto.entries
-          .map((e) {
-            final pts = e.value..sort((a, b) => a.data.compareTo(b.data));
-            return _SerieHistorico(
-              productId: e.key,
-              description: descricoes[e.key] ?? e.key,
-              pontos: pts,
-            );
-          })
-          .toList()
-        ..sort((a, b) => a.description.compareTo(b.description));
+      final series = porProduto.entries.map((e) {
+        final pts = e.value..sort((a, b) => a.data.compareTo(b.data));
+        return _SerieHistorico(
+          productId: e.key,
+          description: descricoes[e.key] ?? e.key,
+          pontos: pts,
+        );
+      }).toList()..sort((a, b) => a.description.compareTo(b.description));
 
       // Calcula range de datas global
       DateTime? dMin, dMax;
@@ -260,16 +257,17 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
       }
     }
 
-    return porPeriodo.values.toList()
-      ..sort((a, b) => a.data.compareTo(b.data));
+    return porPeriodo.values.toList()..sort((a, b) => a.data.compareTo(b.data));
   }
 
   List<_SerieHistorico> get _seriesAgrupadas => _seriesNoGrafico
-      .map((s) => _SerieHistorico(
-            productId: s.productId,
-            description: s.description,
-            pontos: _agruparPontos(s.pontos),
-          ))
+      .map(
+        (s) => _SerieHistorico(
+          productId: s.productId,
+          description: s.description,
+          pontos: _agruparPontos(s.pontos),
+        ),
+      )
       .toList();
 
   // ── KPIs globais ──────────────────────────────────────────────────────────
@@ -305,9 +303,9 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
 
   void _snack(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: Colors.red),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
   }
 
   double? _toDouble(dynamic v) {
@@ -324,8 +322,18 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
 
   String _fmtMes(DateTime dt) {
     const meses = [
-      'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
-      'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'
+      'Jan',
+      'Fev',
+      'Mar',
+      'Abr',
+      'Mai',
+      'Jun',
+      'Jul',
+      'Ago',
+      'Set',
+      'Out',
+      'Nov',
+      'Dez',
     ];
     return '${meses[dt.month - 1]}/${dt.year.toString().substring(2)}';
   }
@@ -344,9 +352,11 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
     if (_buscaMaterial.isEmpty) return _series;
     final q = _buscaMaterial.toLowerCase();
     return _series
-        .where((s) =>
-            s.description.toLowerCase().contains(q) ||
-            s.productId.toLowerCase().contains(q))
+        .where(
+          (s) =>
+              s.description.toLowerCase().contains(q) ||
+              s.productId.toLowerCase().contains(q),
+        )
         .toList();
   }
 
@@ -381,23 +391,16 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6F8),
-      body: Row(
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Sidebar(paginaAtiva: 'relatorio'),
+          _topbar(),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _topbar(),
-                Expanded(
-                  child: _listaSelecionadaId == null
-                      ? _estadoInicial()
-                      : _loadingHistorico
-                          ? const Center(child: CircularProgressIndicator())
-                          : _corpo(),
-                ),
-              ],
-            ),
+            child: _listaSelecionadaId == null
+                ? _estadoInicial()
+                : _loadingHistorico
+                ? const Center(child: CircularProgressIndicator())
+                : _corpo(),
           ),
         ],
       ),
@@ -415,14 +418,17 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
       ),
       child: Row(
         children: [
-          const Text('Relatório de preços',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const Text(
+            'Relatório de preços',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
           const SizedBox(width: 24),
           _loadingListas
               ? const SizedBox(
                   width: 20,
                   height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2))
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
               : Flexible(
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 340),
@@ -432,19 +438,21 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
                       decoration: InputDecoration(
                         hintText: 'Selecione uma lista de preço...',
                         hintStyle: TextStyle(
-                            fontSize: 13, color: Colors.grey.shade400),
+                          fontSize: 13,
+                          color: Colors.grey.shade400,
+                        ),
                         isDense: true,
                         contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 10),
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
-                          borderSide:
-                              BorderSide(color: Colors.grey.shade300),
+                          borderSide: BorderSide(color: Colors.grey.shade300),
                         ),
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
-                          borderSide:
-                              BorderSide(color: Colors.grey.shade300),
+                          borderSide: BorderSide(color: Colors.grey.shade300),
                         ),
                       ),
                       items: _listas.map((l) {
@@ -459,7 +467,8 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
                       }).toList(),
                       onChanged: (v) {
                         if (v == null) return;
-                        final nome = _listas
+                        final nome =
+                            _listas
                                 .firstWhere((l) => l['id'] == v)['description']
                                 ?.toString() ??
                             v;
@@ -485,11 +494,14 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
         children: [
           Icon(Icons.bar_chart_rounded, size: 64, color: Colors.grey.shade300),
           const SizedBox(height: 16),
-          Text('Selecione uma lista de preço',
-              style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.grey.shade600)),
+          Text(
+            'Selecione uma lista de preço',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey.shade600,
+            ),
+          ),
           const SizedBox(height: 6),
           Text(
             'O gráfico mostrará a evolução de preços ao longo dos drafts aprovados.',
@@ -507,8 +519,11 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.history_toggle_off_rounded,
-                size: 56, color: Colors.grey.shade300),
+            Icon(
+              Icons.history_toggle_off_rounded,
+              size: 56,
+              color: Colors.grey.shade300,
+            ),
             const SizedBox(height: 12),
             Text(
               'Nenhum draft aprovado encontrado para "$_listaSelecionadaNome".',
@@ -558,8 +573,8 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
       corVariacao = pct > 0
           ? Colors.green.shade700
           : pct < 0
-              ? Colors.red.shade600
-              : Colors.grey.shade600;
+          ? Colors.red.shade600
+          : Colors.grey.shade600;
     }
 
     return Container(
@@ -601,17 +616,28 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
           ),
           const Spacer(),
           // Toggle de agrupamento
-          Text('Agrupar por:',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+          Text(
+            'Agrupar por:',
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+          ),
           const SizedBox(width: 8),
-          _toggleBtn('Mês', _agrupamento == 'mes',
-              () => setState(() => _agrupamento = 'mes')),
+          _toggleBtn(
+            'Mês',
+            _agrupamento == 'mes',
+            () => setState(() => _agrupamento = 'mes'),
+          ),
           const SizedBox(width: 4),
-          _toggleBtn('Dia', _agrupamento == 'dia',
-              () => setState(() => _agrupamento = 'dia')),
+          _toggleBtn(
+            'Dia',
+            _agrupamento == 'dia',
+            () => setState(() => _agrupamento = 'dia'),
+          ),
           const SizedBox(width: 4),
-          _toggleBtn('Tudo', _agrupamento == 'tudo',
-              () => setState(() => _agrupamento = 'tudo')),
+          _toggleBtn(
+            'Tudo',
+            _agrupamento == 'tudo',
+            () => setState(() => _agrupamento = 'tudo'),
+          ),
         ],
       ),
     );
@@ -642,18 +668,24 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(label,
-                  style: TextStyle(
-                      fontSize: 10,
-                      color: Colors.grey.shade500,
-                      fontWeight: FontWeight.w500)),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Colors.grey.shade500,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
               const SizedBox(height: 2),
-              Text(valor,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                      color: cor)),
+              Text(
+                valor,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: cor,
+                ),
+              ),
             ],
           ),
         ],
@@ -669,15 +701,16 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
         decoration: BoxDecoration(
           color: active ? _laranja : Colors.transparent,
           borderRadius: BorderRadius.circular(6),
-          border: Border.all(
-            color: active ? _laranja : Colors.grey.shade300,
+          border: Border.all(color: active ? _laranja : Colors.grey.shade300),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: active ? Colors.white : Colors.grey.shade600,
           ),
         ),
-        child: Text(label,
-            style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: active ? Colors.white : Colors.grey.shade600)),
       ),
     );
   }
@@ -702,25 +735,30 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
               children: [
                 Row(
                   children: [
-                    Text('Materiais',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                            color: Colors.grey.shade800)),
+                    Text(
+                      'Materiais',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: Colors.grey.shade800,
+                      ),
+                    ),
                     const Spacer(),
                     TextButton(
                       onPressed: () => setState(() {
                         if (_materiaisSelecionados.length == _series.length) {
                           _materiaisSelecionados.clear();
                         } else {
-                          _materiaisSelecionados
-                              .addAll(_series.map((s) => s.productId));
+                          _materiaisSelecionados.addAll(
+                            _series.map((s) => s.productId),
+                          );
                         }
                       }),
                       style: TextButton.styleFrom(
-                          padding: EdgeInsets.zero,
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                        padding: EdgeInsets.zero,
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
                       child: Text(
                         _materiaisSelecionados.length == _series.length
                             ? 'Desmarcar todos'
@@ -737,21 +775,23 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
                     decoration: InputDecoration(
                       hintText: 'Buscar material...',
                       hintStyle: TextStyle(
-                          fontSize: 12, color: Colors.grey.shade400),
-                      prefixIcon: Icon(Icons.search,
-                          size: 16, color: Colors.grey.shade400),
+                        fontSize: 12,
+                        color: Colors.grey.shade400,
+                      ),
+                      prefixIcon: Icon(
+                        Icons.search,
+                        size: 16,
+                        color: Colors.grey.shade400,
+                      ),
                       isDense: true,
-                      contentPadding:
-                          const EdgeInsets.symmetric(vertical: 0),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 0),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide:
-                            BorderSide(color: Colors.grey.shade300),
+                        borderSide: BorderSide(color: Colors.grey.shade300),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide:
-                            BorderSide(color: Colors.grey.shade300),
+                        borderSide: BorderSide(color: Colors.grey.shade300),
                       ),
                     ),
                     style: const TextStyle(fontSize: 12),
@@ -768,8 +808,7 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
               itemCount: filtrados.length,
               itemBuilder: (_, i) {
                 final s = filtrados[i];
-                final selected =
-                    _materiaisSelecionados.contains(s.productId);
+                final selected = _materiaisSelecionados.contains(s.productId);
                 final corIdx = _series.indexOf(s);
                 final cor = _corPorIndex(corIdx);
 
@@ -781,14 +820,15 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
                   }),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 10),
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
                     decoration: BoxDecoration(
                       color: selected
                           ? cor.withOpacity(0.06)
                           : Colors.transparent,
                       border: selected
-                          ? Border(
-                              left: BorderSide(color: cor, width: 3))
+                          ? Border(left: BorderSide(color: cor, width: 3))
                           : null,
                     ),
                     child: Row(
@@ -822,8 +862,9 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
                               Text(
                                 '${s.productId} · ${s.pontos.length} mudança(s)',
                                 style: TextStyle(
-                                    fontSize: 10,
-                                    color: Colors.grey.shade500),
+                                  fontSize: 10,
+                                  color: Colors.grey.shade500,
+                                ),
                               ),
                             ],
                           ),
@@ -878,7 +919,9 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
       }
     }
     final rawPad = (yMax - yMin) * 0.15;
-    final yPad = rawPad < 1.0 ? (yMax * 0.05).clamp(1.0, double.infinity) : rawPad;
+    final yPad = rawPad < 1.0
+        ? (yMax * 0.05).clamp(1.0, double.infinity)
+        : rawPad;
     yMin = (yMin - yPad).clamp(0, double.infinity);
     yMax = yMax + yPad;
 
@@ -913,14 +956,15 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
               Text(
                 'Evolução de preços — $_listaSelecionadaNome',
                 style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.bold),
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const Spacer(),
               if (_dataMin != null && _dataMax != null)
                 Text(
                   '${_fmtData(_dataMin!)} → ${_fmtData(_dataMax!)}',
-                  style: TextStyle(
-                      fontSize: 11, color: Colors.grey.shade500),
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
                 ),
             ],
           ),
@@ -950,7 +994,9 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
                         child: Text(
                           series[i].description,
                           style: TextStyle(
-                              fontSize: 10, color: Colors.grey.shade700),
+                            fontSize: 10,
+                            color: Colors.grey.shade700,
+                          ),
                           overflow: TextOverflow.ellipsis,
                           maxLines: 1,
                         ),
@@ -967,11 +1013,12 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final w = constraints.maxWidth;
-                final h = constraints.maxHeight - 20; // 20px reservado para labels do eixo X
+                final h =
+                    constraints.maxHeight -
+                    20; // 20px reservado para labels do eixo X
 
                 double xToPixel(DateTime dt) {
-                  final ms =
-                      dt.difference(xMinP).inMilliseconds.toDouble();
+                  final ms = dt.difference(xMinP).inMilliseconds.toDouble();
                   return (ms / xSpan) * w;
                 }
 
@@ -1031,8 +1078,8 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
                           fmtX: _agrupamento == 'mes'
                               ? _fmtMes
                               : _agrupamento == 'tudo'
-                                  ? _fmtHora
-                                  : _fmtData,
+                              ? _fmtHora
+                              : _fmtData,
                         ),
                       ),
                       // Linhas
@@ -1061,8 +1108,8 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
                             fmtData: _agrupamento == 'mes'
                                 ? _fmtMes
                                 : _agrupamento == 'tudo'
-                                    ? _fmtHora
-                                    : _fmtData,
+                                ? _fmtHora
+                                : _fmtData,
                             fmtMoeda: _fmtMoeda,
                           ),
                         ),
@@ -1088,8 +1135,7 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
         children: [
           // Cabeçalho
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
             color: Colors.grey.shade50,
             child: Row(
               children: [
@@ -1110,7 +1156,9 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
                     child: Text(
                       'Selecione materiais no painel à esquerda.',
                       style: TextStyle(
-                          color: Colors.grey.shade500, fontSize: 13),
+                        color: Colors.grey.shade500,
+                        fontSize: 13,
+                      ),
                     ),
                   )
                 : ListView.builder(
@@ -1118,15 +1166,16 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
                     itemBuilder: (_, i) {
                       final s = seriesVisiveis[i];
                       final cor = _corPorProductId(s.productId);
-                      final expandido = _materiaisExpandidos
-                          .contains(s.productId);
+                      final expandido = _materiaisExpandidos.contains(
+                        s.productId,
+                      );
                       final dif = s.variacaoAbsoluta;
                       final pct = s.variacaoPct;
                       final difColor = dif > 0
                           ? Colors.green.shade700
                           : dif < 0
-                              ? Colors.red.shade600
-                              : Colors.grey.shade500;
+                          ? Colors.red.shade600
+                          : Colors.grey.shade500;
 
                       return Column(
                         children: [
@@ -1134,22 +1183,20 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
                           InkWell(
                             onTap: () => setState(() {
                               expandido
-                                  ? _materiaisExpandidos
-                                      .remove(s.productId)
-                                  : _materiaisExpandidos
-                                      .add(s.productId);
+                                  ? _materiaisExpandidos.remove(s.productId)
+                                  : _materiaisExpandidos.add(s.productId);
                             }),
                             child: Container(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 20, vertical: 11),
+                                horizontal: 20,
+                                vertical: 11,
+                              ),
                               decoration: BoxDecoration(
-                                color: expandido
-                                    ? cor.withOpacity(0.04)
-                                    : null,
+                                color: expandido ? cor.withOpacity(0.04) : null,
                                 border: expandido
                                     ? Border(
-                                        left: BorderSide(
-                                            color: cor, width: 3))
+                                        left: BorderSide(color: cor, width: 3),
+                                      )
                                     : null,
                               ),
                               child: Row(
@@ -1184,20 +1231,22 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
                                             crossAxisAlignment:
                                                 CrossAxisAlignment.start,
                                             children: [
-                                              Text(s.description,
-                                                  style: const TextStyle(
-                                                      fontSize: 12,
-                                                      fontWeight:
-                                                          FontWeight.w500),
-                                                  overflow:
-                                                      TextOverflow.ellipsis),
-                                              Text(s.productId,
-                                                  style: TextStyle(
-                                                      fontSize: 10,
-                                                      color: Colors
-                                                          .grey.shade500,
-                                                      fontFamily:
-                                                          'monospace')),
+                                              Text(
+                                                s.description,
+                                                style: const TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                              Text(
+                                                s.productId,
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  color: Colors.grey.shade500,
+                                                  fontFamily: 'monospace',
+                                                ),
+                                              ),
                                             ],
                                           ),
                                         ),
@@ -1211,8 +1260,9 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
                                       _fmtMoeda(s.precoInicial),
                                       textAlign: TextAlign.right,
                                       style: TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.grey.shade600),
+                                        fontSize: 12,
+                                        color: Colors.grey.shade600,
+                                      ),
                                     ),
                                   ),
                                   // Preço atual
@@ -1222,8 +1272,9 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
                                       _fmtMoeda(s.precoFinal),
                                       textAlign: TextAlign.right,
                                       style: const TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
                                     ),
                                   ),
                                   // Variação R$
@@ -1233,9 +1284,10 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
                                       '${dif >= 0 ? '+' : ''}${_fmtMoeda(dif)}',
                                       textAlign: TextAlign.right,
                                       style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                          color: difColor),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: difColor,
+                                      ),
                                     ),
                                   ),
                                   // Variação %
@@ -1245,9 +1297,10 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
                                       '${pct >= 0 ? '+' : ''}${pct.toStringAsFixed(2)}%',
                                       textAlign: TextAlign.right,
                                       style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                          color: difColor),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: difColor,
+                                      ),
                                     ),
                                   ),
                                   // Nº de mudanças
@@ -1256,18 +1309,22 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
                                     child: Center(
                                       child: Container(
                                         padding: const EdgeInsets.symmetric(
-                                            horizontal: 8, vertical: 3),
+                                          horizontal: 8,
+                                          vertical: 3,
+                                        ),
                                         decoration: BoxDecoration(
                                           color: cor.withOpacity(0.10),
-                                          borderRadius:
-                                              BorderRadius.circular(12),
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
                                         ),
                                         child: Text(
                                           '${s.pontos.length}',
                                           style: TextStyle(
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w600,
-                                              color: cor),
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                            color: cor,
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -1282,29 +1339,47 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
                             Container(
                               color: Colors.grey.shade50,
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 20, vertical: 6),
+                                horizontal: 20,
+                                vertical: 6,
+                              ),
                               child: Row(
                                 children: [
                                   const Expanded(flex: 1, child: SizedBox()),
                                   _thSub('Data', flex: 3),
-                                  _thSub('Preço anterior', flex: 2, align: TextAlign.right),
-                                  _thSub('Novo preço', flex: 2, align: TextAlign.right),
-                                  _thSub('Variação R\$', flex: 2, align: TextAlign.right),
-                                  _thSub('Variação %', flex: 2, align: TextAlign.right),
+                                  _thSub(
+                                    'Preço anterior',
+                                    flex: 2,
+                                    align: TextAlign.right,
+                                  ),
+                                  _thSub(
+                                    'Novo preço',
+                                    flex: 2,
+                                    align: TextAlign.right,
+                                  ),
+                                  _thSub(
+                                    'Variação R\$',
+                                    flex: 2,
+                                    align: TextAlign.right,
+                                  ),
+                                  _thSub(
+                                    'Variação %',
+                                    flex: 2,
+                                    align: TextAlign.right,
+                                  ),
                                   const Expanded(flex: 2, child: SizedBox()),
                                 ],
                               ),
                             ),
                             for (var j = 0; j < s.pontos.length; j++) ...[
                               _linhaEvolucao(
-                                  s.pontos[j],
-                                  j > 0 ? s.pontos[j - 1].preco : null,
-                                  cor),
+                                s.pontos[j],
+                                j > 0 ? s.pontos[j - 1].preco : null,
+                                cor,
+                              ),
                             ],
                             const Divider(height: 1, thickness: 1),
                           ] else
-                            Divider(
-                                height: 1, color: Colors.grey.shade100),
+                            Divider(height: 1, color: Colors.grey.shade100),
                         ],
                       );
                     },
@@ -1316,7 +1391,10 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
   }
 
   Widget _linhaEvolucao(
-      _PontoHistorico ponto, double? precoAnteriorFallback, Color cor) {
+    _PontoHistorico ponto,
+    double? precoAnteriorFallback,
+    Color cor,
+  ) {
     // Usa o old_price salvo no draft; se não tiver, usa o ponto anterior da série
     final anterior = ponto.precoAnterior ?? precoAnteriorFallback;
     final dif = anterior != null ? ponto.preco - anterior : null;
@@ -1326,14 +1404,13 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
     final difColor = dif == null
         ? Colors.grey.shade500
         : dif > 0
-            ? Colors.green.shade700
-            : dif < 0
-                ? Colors.red.shade600
-                : Colors.grey.shade500;
+        ? Colors.green.shade700
+        : dif < 0
+        ? Colors.red.shade600
+        : Colors.grey.shade500;
 
     return Container(
-      padding:
-          const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border(
@@ -1355,10 +1432,9 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
                   _agrupamento == 'mes'
                       ? _fmtMes(ponto.data)
                       : _agrupamento == 'tudo'
-                          ? _fmtHora(ponto.data)
-                          : _fmtData(ponto.data),
-                  style: TextStyle(
-                      fontSize: 11, color: Colors.grey.shade600),
+                      ? _fmtHora(ponto.data)
+                      : _fmtData(ponto.data),
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
                 ),
               ],
             ),
@@ -1370,11 +1446,12 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
               anterior != null ? _fmtMoeda(anterior) : '—',
               textAlign: TextAlign.right,
               style: TextStyle(
-                  fontSize: 11,
-                  color: Colors.grey.shade500,
-                  decoration: anterior != null
-                      ? TextDecoration.lineThrough
-                      : null),
+                fontSize: 11,
+                color: Colors.grey.shade500,
+                decoration: anterior != null
+                    ? TextDecoration.lineThrough
+                    : null,
+              ),
             ),
           ),
           // Novo preço
@@ -1383,22 +1460,20 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
             child: Text(
               _fmtMoeda(ponto.preco),
               textAlign: TextAlign.right,
-              style: const TextStyle(
-                  fontSize: 11, fontWeight: FontWeight.w600),
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
             ),
           ),
           // Variação R$
           Expanded(
             flex: 2,
             child: Text(
-              dif != null
-                  ? '${dif >= 0 ? '+' : ''}${_fmtMoeda(dif)}'
-                  : '—',
+              dif != null ? '${dif >= 0 ? '+' : ''}${_fmtMoeda(dif)}' : '—',
               textAlign: TextAlign.right,
               style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: difColor),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: difColor,
+              ),
             ),
           ),
           // Variação %
@@ -1410,9 +1485,10 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
                   : '—',
               textAlign: TextAlign.right,
               style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: difColor),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: difColor,
+              ),
             ),
           ),
           const Expanded(flex: 2, child: SizedBox()),
@@ -1421,33 +1497,45 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
     );
   }
 
-  static Widget _th(String label,
-      {required int flex, TextAlign align = TextAlign.left}) {
+  static Widget _th(
+    String label, {
+    required int flex,
+    TextAlign align = TextAlign.left,
+  }) {
     return Expanded(
       flex: flex,
-      child: Text(label,
-          textAlign: align,
-          overflow: TextOverflow.ellipsis,
-          maxLines: 1,
-          style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: Colors.grey.shade600)),
+      child: Text(
+        label,
+        textAlign: align,
+        overflow: TextOverflow.ellipsis,
+        maxLines: 1,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: Colors.grey.shade600,
+        ),
+      ),
     );
   }
 
-  static Widget _thSub(String label,
-      {required int flex, TextAlign align = TextAlign.left}) {
+  static Widget _thSub(
+    String label, {
+    required int flex,
+    TextAlign align = TextAlign.left,
+  }) {
     return Expanded(
       flex: flex,
-      child: Text(label,
-          textAlign: align,
-          overflow: TextOverflow.ellipsis,
-          maxLines: 1,
-          style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey.shade500)),
+      child: Text(
+        label,
+        textAlign: align,
+        overflow: TextOverflow.ellipsis,
+        maxLines: 1,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          color: Colors.grey.shade500,
+        ),
+      ),
     );
   }
 }
@@ -1460,11 +1548,12 @@ class _GridPainter extends CustomPainter {
   final int yLines;
   final String Function(double) fmtY;
 
-  _GridPainter(
-      {required this.yMin,
-      required this.yMax,
-      required this.yLines,
-      required this.fmtY});
+  _GridPainter({
+    required this.yMin,
+    required this.yMax,
+    required this.yLines,
+    required this.fmtY,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1472,7 +1561,10 @@ class _GridPainter extends CustomPainter {
       ..color = Colors.grey.shade100
       ..strokeWidth = 1;
     final textStyle = TextStyle(
-        fontSize: 10, color: Colors.grey.shade400, fontFamily: 'monospace');
+      fontSize: 10,
+      color: Colors.grey.shade400,
+      fontFamily: 'monospace',
+    );
 
     for (var i = 0; i <= yLines; i++) {
       final ratio = i / yLines;
@@ -1489,8 +1581,7 @@ class _GridPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_GridPainter old) =>
-      old.yMin != yMin || old.yMax != yMax;
+  bool shouldRepaint(_GridPainter old) => old.yMin != yMin || old.yMax != yMax;
 }
 
 class _XAxisPainter extends CustomPainter {
@@ -1507,7 +1598,10 @@ class _XAxisPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final textStyle = TextStyle(
-        fontSize: 9, color: Colors.grey.shade400, fontFamily: 'monospace');
+      fontSize: 9,
+      color: Colors.grey.shade400,
+      fontFamily: 'monospace',
+    );
     final tickPaint = Paint()
       ..color = Colors.grey.shade200
       ..strokeWidth = 1;
@@ -1522,8 +1616,7 @@ class _XAxisPainter extends CustomPainter {
 
     for (final dt in datas) {
       final x = xToPixel(dt);
-      canvas.drawLine(
-          Offset(x, 0), Offset(x, size.height), tickPaint);
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), tickPaint);
       final tp = TextPainter(
         text: TextSpan(text: fmtX(dt), style: textStyle),
         textDirection: TextDirection.ltr,
@@ -1580,7 +1673,11 @@ class _LinePainter extends CustomPainter {
       const dashW = 6.0, gapW = 4.0;
       double dx = 0;
       while (dx < size.width) {
-        canvas.drawLine(Offset(dx, y), Offset((dx + dashW).clamp(0, size.width), y), dashedPaint);
+        canvas.drawLine(
+          Offset(dx, y),
+          Offset((dx + dashW).clamp(0, size.width), y),
+          dashedPaint,
+        );
         dx += dashW + gapW;
       }
       canvas.drawCircle(Offset(x, y), 6, dotBorderPaint);
@@ -1642,7 +1739,8 @@ class _TooltipBox extends StatelessWidget {
     final serie = productId != null
         ? series.cast<_SerieHistorico?>().firstWhere(
             (s) => s?.productId == productId,
-            orElse: () => null)
+            orElse: () => null,
+          )
         : null;
 
     return Container(
@@ -1653,9 +1751,10 @@ class _TooltipBox extends StatelessWidget {
         border: Border.all(color: cor.withOpacity(0.3)),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withOpacity(0.08),
-              blurRadius: 8,
-              offset: const Offset(0, 2)),
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
         ],
       ),
       constraints: const BoxConstraints(minWidth: 160, maxWidth: 220),
@@ -1664,20 +1763,30 @@ class _TooltipBox extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (serie != null) ...[
-            Text(serie.description,
-                style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: cor),
-                overflow: TextOverflow.ellipsis),
+            Text(
+              serie.description,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: cor,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
             const SizedBox(height: 4),
           ],
-          Text(fmtData(ponto.data),
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+          Text(
+            fmtData(ponto.data),
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+          ),
           const SizedBox(height: 4),
-          Text(fmtMoeda(ponto.preco),
-              style: TextStyle(
-                  fontSize: 16, fontWeight: FontWeight.bold, color: cor)),
+          Text(
+            fmtMoeda(ponto.preco),
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: cor,
+            ),
+          ),
           if (ponto.precoAnterior != null) ...[
             const SizedBox(height: 2),
             Text(

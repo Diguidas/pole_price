@@ -30,17 +30,18 @@ class PricingPolicy {
   }
 
   Map<String, dynamic> toJson() => {
-        'name': name,
-        'margem_flat': margemFlat,
-        'margem_oferta': margemOferta,
-        'descricao': descricao,
-      };
+    'name': name,
+    'margem_flat': margemFlat,
+    'margem_oferta': margemOferta,
+    'descricao': descricao,
+  };
 
   String get margemFlatFormatada =>
       margemFlat != null ? '${(margemFlat! * 100).toStringAsFixed(0)}%' : '—';
 
-  String get margemOfertaFormatada =>
-      margemOferta != null ? '${(margemOferta! * 100).toStringAsFixed(0)}%' : '—';
+  String get margemOfertaFormatada => margemOferta != null
+      ? '${(margemOferta! * 100).toStringAsFixed(0)}%'
+      : '—';
 }
 
 class PolicyPriceList {
@@ -61,4 +62,22 @@ class PolicyPriceList {
       regraExclusiva: json['regra_exclusiva'],
     );
   }
+}
+
+class AllPriceList {
+  final String id;
+  final String description;
+  final String? policyId;
+
+  AllPriceList({required this.id, required this.description, this.policyId});
+
+  factory AllPriceList.fromJson(Map<String, dynamic> json) {
+    return AllPriceList(
+      id: json['id'] ?? '',
+      description: json['description'] ?? '',
+      policyId: json['policy_id'],
+    );
+  }
+
+  bool get vinculada => policyId != null;
 }

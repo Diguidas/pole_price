@@ -29,7 +29,9 @@ class ProductGroupService {
     final clusters = <String, List<PricingCluster>>{};
     for (final c in clustersRes as List) {
       final groupId = c['group_id'] as String? ?? '';
-      clusters.putIfAbsent(groupId, () => []).add(
+      clusters
+          .putIfAbsent(groupId, () => [])
+          .add(
             PricingCluster(
               id: c['id'] ?? '',
               name: c['name'] ?? '',
@@ -61,7 +63,9 @@ class ProductGroupService {
     final groups = <String, List<ProductGroup>>{};
     for (final g in groupsRes as List) {
       final lineId = g['line_id'] as String? ?? '';
-      groups.putIfAbsent(lineId, () => []).add(
+      groups
+          .putIfAbsent(lineId, () => [])
+          .add(
             ProductGroup(
               id: g['id'] ?? '',
               name: g['name'] ?? '',
@@ -75,7 +79,9 @@ class ProductGroupService {
     final lines = <String, List<ProductLine>>{};
     for (final l in linesRes as List) {
       final catId = l['category_id'] as String? ?? '';
-      lines.putIfAbsent(catId, () => []).add(
+      lines
+          .putIfAbsent(catId, () => [])
+          .add(
             ProductLine(
               id: l['id'] ?? '',
               name: l['name'] ?? '',
@@ -117,5 +123,20 @@ class ProductGroupService {
             : null,
       );
     }).toList();
+  }
+
+  /// Salva (insert ou update) o CPV de um produto.
+  /// Usa upsert em product_costs pela chave (product_code, period).
+  Future<void> upsertCpv({
+    required String productCode,
+    required double costValue,
+    String period = 'MANUAL',
+  }) async {
+    await supabase.from('product_costs').upsert({
+      'product_code': productCode,
+      'cost_value': costValue,
+      'period': period,
+      'classification': 'MANUAL',
+    }, onConflict: 'product_code,period');
   }
 }
