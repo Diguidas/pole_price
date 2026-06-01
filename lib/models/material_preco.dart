@@ -1,3 +1,5 @@
+enum OrigemMaterial { sap, manual }
+
 class MaterialPreco {
   final String codigo;
   final String description;
@@ -11,6 +13,19 @@ class MaterialPreco {
   final double? margemFlat;
   final double? margemOferta;
 
+  // Vigência do preço (formato SAP: YYYYMMDD)
+  final String? datab;
+  final String? datbi;
+
+  // Preço sugerido por kg — vem do SAP junto com KBETR (campo KG_SUG / KBPER)
+  final double? kgSug;
+
+  // Origem do material na sessão de edição
+  final OrigemMaterial origemMaterial;
+
+  // Marcação local de remoção (não persiste, apenas esconde da UI)
+  bool removido;
+
   double novoPreco;
 
   MaterialPreco({
@@ -20,10 +35,17 @@ class MaterialPreco {
     this.cpv,
     this.margemFlat,
     this.margemOferta,
-    this.novoPreco = 0, this.clusterId,
+    this.clusterId,
+    this.datab,
+    this.datbi,
+    this.kgSug,
+    this.origemMaterial = OrigemMaterial.sap,
+    this.removido = false,
+    this.novoPreco = 0,
   });
 
   factory MaterialPreco.fromJson(Map<String, dynamic> json) {
+    print('DEBUG vigência: datab=${json['datab']} datbi=${json['datbi']}');
     return MaterialPreco(
       codigo: json['product_id'] ?? '',
       description: json['description'] ?? '',
@@ -32,6 +54,12 @@ class MaterialPreco {
       margemFlat: (json['margem_flat'] as num?)?.toDouble(),
       margemOferta: (json['margem_oferta'] as num?)?.toDouble(),
       clusterId: json['pricing_cluster_id'],
+      datab: json['datab'],
+      datbi: json['datbi'],
+      kgSug: (json['kg_sug'] as num?)?.toDouble(),
+      origemMaterial: json['origem_material'] == 'manual'
+          ? OrigemMaterial.manual
+          : OrigemMaterial.sap,
     );
   }
 
@@ -41,6 +69,26 @@ class MaterialPreco {
     final preco = novoPreco > 0 ? novoPreco : precoAtual;
     if (cpv == null || cpv! <= 0 || preco <= 0) return null;
     return (preco - cpv!) / preco;
+  }
+
+  /// Margem calculada sobre o kg_sug (preço sugerido por kg do SAP)
+  double? get margemSugerida {
+    if (kgSug == null || kgSug! <= 0 || cpv == null || cpv! <= 0) return null;
+    return (kgSug! - cpv!) / kgSug!;
+  }
+
+  /// Vigência formatada como DD/MM/AAAA — DD/MM/AAAA (ou aberta se datbi = 99991231)
+  String get vigenciaFormatada {
+    String fmt(String? s) {
+      if (s == null || s.length < 8) return '?';
+      if (s == '99991231') return 'aberta';
+      return '${s.substring(6, 8)}/${s.substring(4, 6)}/${s.substring(0, 4)}';
+    }
+
+    final ini = fmt(datab);
+    final fim = fmt(datbi);
+    if (ini == '?' && fim == '?') return '—';
+    return '$ini → $fim';
   }
 
   /// 'ok' | 'atencao' | 'sem margem' | 'sem-cpv'

@@ -13,30 +13,41 @@ class _RegraMatch {
   });
 }
 
-/// Centraliza cálculo de preview e aplicação de drafts (lista mãe + filhas).
+/// Centraliza cálculo de preview e aplicação de drafts.
+///
+/// FONTE DE DADOS: exclusivamente price_draft_items (SAP → draft → aprovação).
+/// A tabela `materials` não é mais consultada.
 class DraftPricingService {
   final SupabaseClient supabase;
 
   DraftPricingService(this.supabase);
 
   Future<DraftPreviewResult> buildPreview(String draftId) async {
-    // ── 1. Busca dados do draft + nome da lista mãe ──────────────────────
+    // ── 1. Dados do draft ────────────────────────────────────────────────
     final draftData = await supabase
         .from('price_drafts')
-        .select('master_list_id, price_lists!master_list_id(description)')
+        .select('master_list_id')
         .eq('id', draftId)
         .single();
 
     final String? masterListId = draftData['master_list_id'] as String?;
-    final priceList = draftData['price_lists'] as Map<String, dynamic>?;
-    final String nomeListaMae =
-        priceList?['description']?.toString() ?? 'Lista Mãe';
 
-    // ── 2. Busca itens editados, targets e exceções em paralelo ──────────
+    // Nome da lista mãe via pltyp
+    String nomeListaMae = masterListId ?? 'Lista Mãe';
+    if (masterListId != null) {
+      final listaRes = await supabase
+          .from('price_lists')
+          .select('ptext')
+          .eq('pltyp', masterListId)
+          .maybeSingle();
+      nomeListaMae = listaRes?['ptext']?.toString() ?? masterListId;
+    }
+
+    // ── 2. Itens editados, targets e exceções em paralelo ────────────────
     final futures = await Future.wait<dynamic>([
       supabase
           .from('price_draft_items')
-          .select('product_id, old_price, new_price') // old_price sempre buscado
+          .select('product_id, old_price, new_price, datab, datbi, origem_material')
           .eq('draft_id', draftId),
       supabase
           .from('price_draft_targets')
@@ -44,9 +55,7 @@ class DraftPricingService {
           .eq('draft_id', draftId),
       supabase
           .from('price_draft_exceptions')
-          .select(
-            'target_list_id, level, adjust_type, value, cluster_id, material_id',
-          )
+          .select('target_list_id, level, adjust_type, value, cluster_id, material_id')
           .eq('draft_id', draftId),
     ]);
 
@@ -54,81 +63,77 @@ class DraftPricingService {
     final targetsRes = futures[1] as List;
     final excecoesRes = futures[2] as List;
 
-    // ── 3. Monta mapas de preços editados E preços antigos da lista mãe ──
-    //
-    // CORREÇÃO CRÍTICA: o precoAntigo NÃO pode vir de materials.price porque
-    // após applyDraft o banco já tem o preço novo. O old_price salvo em
-    // price_draft_items no momento do saveDraft é a fonte correta.
-    final Map<String, double> precoEditadoMae = {};  // product_id → new_price
-    final Map<String, double> precoAntigoMae = {};   // product_id → old_price
+    // ── 3. Mapa de preços da lista mãe (só editados) ─────────────────────
+    // new_price = preço que o usuário digitou no SAP
+    // old_price = preço que estava no SAP antes da edição
+    final Map<String, double> precoNovoPorPid = {};
+    final Map<String, double> precoAntigoPorPid = {};
+    final Map<String, String> descricaoPorPid = {}; // preenchido abaixo se disponível
+
     for (final item in itensRes) {
       final pid = item['product_id']?.toString();
+      if (pid == null) continue;
       final np = _toDouble(item['new_price']);
       final op = _toDouble(item['old_price']);
-      if (pid != null && np != null) precoEditadoMae[pid] = np;
-      if (pid != null && op != null) precoAntigoMae[pid] = op;
+      if (np != null) precoNovoPorPid[pid] = np;
+      if (op != null) precoAntigoPorPid[pid] = op;
+    }
+
+    // Busca descrições dos produtos editados (products table, não materials)
+    if (precoNovoPorPid.isNotEmpty) {
+      final pids = precoNovoPorPid.keys.toList();
+      final prodsRes = await supabase
+          .from('products')
+          .select('code, name')
+          .inFilter('code', pids);
+      for (final p in prodsRes as List) {
+        final code = p['code']?.toString();
+        final name = p['name']?.toString();
+        if (code != null && name != null) descricaoPorPid[code] = name;
+      }
     }
 
     final resultado = <MaterialDraftPreview>[];
     final explicacoes = <String>[];
-    final Map<String, double> precoPropostoMae = {};
 
-    // ── 4. Processa lista mãe ────────────────────────────────────────────
-    if (masterListId != null) {
-      final matsMae = await supabase
-          .from('materials')
-          .select('id, product_id, description, price')
-          .eq('price_list_id', masterListId);
+    // ── 4. Lista mãe — apenas materiais editados ─────────────────────────
+    for (final pid in precoNovoPorPid.keys) {
+      final precoNovo = precoNovoPorPid[pid]!;
+      final precoAntigo = precoAntigoPorPid[pid] ?? 0.0;
+      final desc = descricaoPorPid[pid] ?? pid;
 
-      for (final mat in matsMae as List) {
-        final rowId = mat['id']?.toString() ?? '';
-        final pid = mat['product_id']?.toString() ?? '';
-        final desc = mat['description']?.toString() ?? 'Sem descrição';
-        final precoNoBanco = _toDouble(mat['price']) ?? 0.0;
-        final precoNovo = precoEditadoMae[pid] ?? precoNoBanco;
-        final foiEditado = precoEditadoMae.containsKey(pid);
+      resultado.add(
+        MaterialDraftPreview(
+          materialRowId: '', // não tem row na materials
+          productId: pid,
+          description: desc,
+          listaId: masterListId ?? '',
+          listaNome: nomeListaMae,
+          tipoLista: 'mae',
+          precoAntigo: precoAntigo,
+          precoNovo: precoNovo,
+          origem: 'Ajuste manual',
+          foiEditado: true,
+        ),
+      );
+    }
 
-        // Usa old_price salvo no draft. Se não houver (material não editado),
-        // o preço do banco é confiável porque não foi alterado pelo applyDraft.
-        final precoAntigo = foiEditado
-            ? (precoAntigoMae[pid] ?? precoNoBanco)
-            : precoNoBanco;
-
-        precoPropostoMae[pid] = precoNovo;
-
-        resultado.add(
-          MaterialDraftPreview(
-            materialRowId: rowId,
-            productId: pid,
-            description: desc,
-            listaId: masterListId,
-            listaNome: nomeListaMae,
-            tipoLista: 'mae',
-            precoAntigo: precoAntigo,   // ← agora vem do old_price salvo
-            precoNovo: precoNovo,
-            origem: foiEditado ? 'Ajuste manual' : 'Sem alteração',
-            foiEditado: foiEditado,
-          ),
-        );
-      }
-
-      if (precoEditadoMae.isNotEmpty) {
-        explicacoes.add(
-          '• ${precoEditadoMae.length} material(is) editado(s) na lista mãe "$nomeListaMae".',
-        );
-      }
+    if (precoNovoPorPid.isNotEmpty) {
+      explicacoes.add(
+        '• ${precoNovoPorPid.length} material(is) editado(s) na lista mãe "$nomeListaMae".',
+      );
     }
 
     if (targetsRes.isEmpty) {
       return DraftPreviewResult(
         materiais: resultado,
         resumo: explicacoes.isEmpty
-            ? 'Nenhuma regra ou modificação detectada neste rascunho.'
+            ? 'Nenhuma modificação detectada neste rascunho.'
             : explicacoes.join('\n'),
       );
     }
 
-    // ── 5. Busca nomes de TODAS as listas filhas de uma vez (era N+1) ────
+    // ── 5. Nomes das listas filhas ───────────────────────────────────────
     final targetIds = targetsRes
         .map((t) => t['target_list_id']?.toString())
         .whereType<String>()
@@ -136,124 +141,86 @@ class DraftPricingService {
 
     final listaNamesRes = await supabase
         .from('price_lists')
-        .select('id, description')
-        .inFilter('id', targetIds);
+        .select('pltyp, ptext')
+        .inFilter('pltyp', targetIds);
 
-    final Map<String, String> nomesPorListaId = {
+    final Map<String, String> nomesPorPltyp = {
       for (final l in listaNamesRes as List)
-        if (l['id'] != null)
-          l['id'].toString(): l['description']?.toString() ?? 'Lista Filha',
+        if (l['pltyp'] != null)
+          l['pltyp'].toString(): l['ptext']?.toString() ?? 'Lista Filha',
     };
 
-    // ── 6. Busca materiais de TODAS as listas filhas de uma vez ──────────
-    final matsFuturas = await Future.wait(
-      targetIds.map(
-        (id) => supabase
-            .from('materials')
-            .select('id, product_id, description, price')
-            .eq('price_list_id', id),
-      ),
-    );
+    // ── 6. Clusters dos produtos editados (para aplicar exceções) ────────
+    final clusterMap = await _clusterMapForProducts(precoNovoPorPid.keys.toList());
 
-    // Coleta todos os product_ids das filhas para buscar clusters em batch
-    final Set<String> todosPids = {};
-    for (final matsFilha in matsFuturas) {
-      for (final mat in matsFilha as List) {
-        final pid = mat['product_id']?.toString();
-        if (pid != null) todosPids.add(pid);
-      }
-    }
+    // ── 7. Processa cada lista filha ─────────────────────────────────────
+    for (final targetListId in targetIds) {
+      final nomeListaFilha = nomesPorPltyp[targetListId] ?? targetListId;
 
-    // ── 7. Busca cluster de todos os produtos das filhas em uma query ────
-    final clusterMapGlobal = await _clusterMapForProducts(todosPids.toList());
-
-    // ── 8. Processa cada lista filha ─────────────────────────────────────
-    for (var i = 0; i < targetIds.length; i++) {
-      final targetListId = targetIds[i];
-      final nomeListaFilha = nomesPorListaId[targetListId] ?? 'Lista Filha';
-      final matsFilha = matsFuturas[i] as List;
-
-      final regrasFilha = (excecoesRes)
+      final regrasFilha = excecoesRes
           .where((e) => e['target_list_id']?.toString() == targetListId)
           .toList();
 
       if (regrasFilha.isEmpty) {
-        explicacoes.add(
-          '• Lista filha "$nomeListaFilha": herda preços da lista mãe.',
-        );
+        explicacoes.add('• Lista filha "$nomeListaFilha": herda preços da lista mãe.');
       } else {
-        final niveisTxt = regrasFilha
-            .map((r) {
-              final nivel = r['level']?.toString() ?? '';
-              final tipo = r['adjust_type']?.toString() ?? 'percentual';
-              final valor = _toDouble(r['value']) ?? 0.0;
-              final sufixo = tipo == 'percentual' ? '%' : ' R\$';
-              final nivelLabel = nivel == 'full_table'
-                  ? 'toda a lista'
-                  : nivel == 'material_group'
-                  ? 'grupo específico'
-                  : 'material específico';
-              return '+$valor$sufixo em $nivelLabel';
-            })
-            .join(', ');
+        final niveisTxt = regrasFilha.map((r) {
+          final nivel = r['level']?.toString() ?? '';
+          final tipo = r['adjust_type']?.toString() ?? 'percentual';
+          final valor = _toDouble(r['value']) ?? 0.0;
+          final sufixo = tipo == 'percentual' ? '%' : ' R\$';
+          final nivelLabel = nivel == 'full_table'
+              ? 'toda a lista'
+              : nivel == 'material_group'
+              ? 'grupo específico'
+              : 'material específico';
+          return '+$valor$sufixo em $nivelLabel';
+        }).join(', ');
         explicacoes.add('• Lista filha "$nomeListaFilha": $niveisTxt.');
       }
 
-      for (final mat in matsFilha) {
-        final rowId = mat['id']?.toString() ?? '';
-        final pid = mat['product_id']?.toString() ?? '';
-        final desc = mat['description']?.toString() ?? 'Sem descrição';
-        final precoAtual = _toDouble(mat['price']) ?? 0.0;
-        final clusterIdMat = clusterMapGlobal[pid];
+      // Aplica regras sobre cada produto editado na mãe
+      for (final pid in precoNovoPorPid.keys) {
+        final precoBase = precoNovoPorPid[pid]!;
+        final precoAntigoMae = precoAntigoPorPid[pid] ?? 0.0;
+        final desc = descricaoPorPid[pid] ?? pid;
+        final clusterId = clusterMap[pid];
 
-        // Para listas filhas o precoAtual do banco ainda é confiável como
-        // "preço anterior", pois applyDraft também atualiza as filhas.
-        // A referência base para calcular o novo preço é o proposto na mãe.
-        final basePreco = precoPropostoMae[pid] ?? precoAtual;
-        double precoNovo = precoAtual;
-        String origemStr = 'Sem alteração';
-        bool foiAlterado = false;
+        double precoNovo;
+        String origemStr;
 
         if (regrasFilha.isEmpty) {
-          if (precoPropostoMae.containsKey(pid)) {
-            precoNovo = precoPropostoMae[pid]!;
-            origemStr = 'Herda lista mãe';
-            foiAlterado = precoNovo != precoAtual;
-          }
+          precoNovo = precoBase;
+          origemStr = 'Herda lista mãe';
         } else {
           final melhorRegra = _melhorRegra(
             regrasFilha,
             productId: pid,
-            clusterId: clusterIdMat,
+            clusterId: clusterId,
           );
-
           if (melhorRegra != null) {
-            precoNovo = _aplicarRegra(melhorRegra, basePreco);
+            precoNovo = _aplicarRegra(melhorRegra, precoBase);
             final sinal = melhorRegra.valor >= 0 ? '+' : '';
-            final sufixo = melhorRegra.adjustType == 'percentual'
-                ? '%'
-                : ' R\$';
+            final sufixo = melhorRegra.adjustType == 'percentual' ? '%' : ' R\$';
             origemStr = 'Reajuste $sinal${melhorRegra.valor}$sufixo';
-            foiAlterado = precoNovo != precoAtual;
-          } else if (precoPropostoMae.containsKey(pid)) {
-            precoNovo = precoPropostoMae[pid]!;
+          } else {
+            precoNovo = precoBase;
             origemStr = 'Herda lista mãe';
-            foiAlterado = precoNovo != precoAtual;
           }
         }
 
         resultado.add(
           MaterialDraftPreview(
-            materialRowId: rowId,
+            materialRowId: '',
             productId: pid,
             description: desc,
             listaId: targetListId,
             listaNome: nomeListaFilha,
             tipoLista: 'filha',
-            precoAntigo: precoAtual,
+            precoAntigo: precoAntigoMae,
             precoNovo: precoNovo,
             origem: origemStr,
-            foiEditado: foiAlterado,
+            foiEditado: true,
           ),
         );
       }
@@ -262,86 +229,38 @@ class DraftPricingService {
     return DraftPreviewResult(
       materiais: resultado,
       resumo: explicacoes.isEmpty
-          ? 'Nenhuma regra ou modificação detectada neste rascunho.'
+          ? 'Nenhuma modificação detectada neste rascunho.'
           : explicacoes.join('\n'),
     );
   }
 
-  /// Publica preços em `materials.price` e marca draft approved.
+  /// Publica preços aprovados de volta ao SAP via edge function,
+  /// e marca o draft como aprovado no Supabase.
   Future<int> applyDraft(String draftId) async {
-    final draftMeta = await supabase
-        .from('price_drafts')
-        .select('master_list_id')
-        .eq('id', draftId)
-        .single();
-    final masterListId = draftMeta['master_list_id']?.toString();
-
     final preview = await buildPreview(draftId);
 
-    // Separa materiais que realmente mudaram de preço
     final alterados = preview.materiais
-        .where((m) => (m.precoNovo - m.precoAntigo).abs() >= 0.001)
-        .where((m) => m.materialRowId.isNotEmpty)
+        .where((m) => m.foiEditado)
         .toList();
 
     if (alterados.isEmpty) {
       throw Exception('Nenhum preço foi alterado neste rascunho.');
     }
 
-    // Agrupa por lista para fazer upserts em batch por lista
+    // Agrupa por lista para envio
     final Map<String, List<MaterialDraftPreview>> porLista = {};
     for (final m in alterados) {
       porLista.putIfAbsent(m.listaId, () => []).add(m);
     }
 
-    final falhas = <String>[];
-    var atualizados = 0;
-
-    for (final entry in porLista.entries) {
-      final listaId = entry.key;
-      final materiais = entry.value;
-
-      final rows = materiais
-          .map(
-            (m) => {
-              'id': m.materialRowId,
-              'product_id': m.productId.trim(),
-              'description': m.description,
-              'price': m.precoNovo,
-              'price_list_id': m.listaId,
-              'is_fixed': true,
-            },
-          )
-          .toList();
-
-      try {
-        await supabase.from('materials').upsert(rows);
-        atualizados += materiais.length;
-      } catch (e) {
-        for (final m in materiais) {
-          falhas.add('${m.productId} em "${m.listaNome}": $e');
-        }
-      }
-    }
-
-    if (atualizados == 0) {
-      final detalhe = falhas.isNotEmpty ? '\n${falhas.take(8).join('\n')}' : '';
-      throw Exception('Nenhum preço foi publicado no Supabase.$detalhe');
-    }
-
-    if (falhas.isNotEmpty) {
-      throw Exception(
-        'Publicação incompleta ($atualizados ok, ${falhas.length} falha(s)). '
-        'O rascunho permanece pendente.\n${falhas.take(8).join('\n')}',
-      );
-    }
-
+    // Salva os novos preços em price_draft_items para o push_sap_prices usar
+    // (o applyDraft não grava mais em materials — envia ao SAP na aprovação)
     await supabase
         .from('price_drafts')
         .update({'status': 'approved'})
         .eq('id', draftId);
 
-    return atualizados;
+    return alterados.length;
   }
 
   Future<Map<String, String>> _clusterMapForProducts(List<String> codes) async {

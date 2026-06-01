@@ -98,14 +98,12 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _carregarAdmin() async {
-    final res = await _supabase
+    final drafts = await _supabase
         .from('price_drafts')
-        .select(
-          'id, status, created_at, created_by_email, price_lists!master_list_id(description)',
-        )
+        .select('id, status, created_at, created_by_email, master_list_id')
         .order('created_at', ascending: false);
 
-    final todos = res as List;
+    final todos = await _enriquecerComLista(drafts as List);
     _totalPendentes = todos.where((d) => d['status'] == 'pending').length;
     _totalAprovados = todos.where((d) => d['status'] == 'approved').length;
     _totalRejeitados = todos.where((d) => d['status'] == 'rejected').length;
@@ -118,20 +116,18 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _carregarAprovador() async {
-    final res = await _supabase
+    final drafts = await _supabase
         .from('price_drafts')
-        .select(
-          'id, status, created_at, created_by_email, price_lists!master_list_id(description)',
-        )
+        .select('id, status, created_at, created_by_email, master_list_id')
         .order('created_at', ascending: false);
 
-    final todos = res as List;
+    final todos = await _enriquecerComLista(drafts as List);
     final permitidas = _perm.listasPermitidas;
     final filtrados = permitidas.isEmpty
         ? todos
         : todos.where((d) {
-            final pl = d['price_lists'] as Map?;
-            return pl != null && permitidas.contains(pl['id']?.toString());
+            final pltyp = d['master_list_id']?.toString();
+            return pltyp != null && permitidas.contains(pltyp);
           }).toList();
 
     _totalPendentes = filtrados.where((d) => d['status'] == 'pending').length;
@@ -146,15 +142,13 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _carregarGestor() async {
-    final res = await _supabase
+    final drafts = await _supabase
         .from('price_drafts')
-        .select(
-          'id, status, created_at, created_by_email, price_lists!master_list_id(description)',
-        )
+        .select('id, status, created_at, created_by_email, master_list_id')
         .eq('created_by_email', _userEmail)
         .order('created_at', ascending: false);
 
-    final todos = res as List;
+    final todos = await _enriquecerComLista(drafts as List);
     _totalPendentes = todos.where((d) => d['status'] == 'pending').length;
     _totalAprovados = todos.where((d) => d['status'] == 'approved').length;
     _totalRejeitados = todos.where((d) => d['status'] == 'rejected').length;
@@ -164,6 +158,35 @@ class _HomeScreenState extends State<HomeScreen>
         .take(5)
         .cast<Map<String, dynamic>>()
         .toList();
+  }
+
+  /// Busca as descrições das listas em price_lists e injeta em cada draft
+  /// como d['price_lists'] = {'description': '...'} — mantém compatibilidade
+  /// com o restante do código que lê esse campo na UI.
+  Future<List<Map<String, dynamic>>> _enriquecerComLista(List drafts) async {
+    final pltyps = drafts
+        .map((d) => d['master_list_id']?.toString())
+        .whereType<String>()
+        .toSet()
+        .toList();
+
+    Map<String, String> descMap = {};
+    if (pltyps.isNotEmpty) {
+      final listas = await _supabase
+          .from('price_lists')
+          .select('pltyp, ptext')
+          .inFilter('pltyp', pltyps);
+      for (final l in listas as List) {
+        descMap[l['pltyp'].toString()] = l['ptext']?.toString() ?? '';
+      }
+    }
+
+    return drafts.map((d) {
+      final m = Map<String, dynamic>.from(d as Map);
+      final pltyp = m['master_list_id']?.toString();
+      m['price_lists'] = {'description': descMap[pltyp] ?? pltyp ?? ''};
+      return m;
+    }).toList();
   }
 
   Future<void> _carregarVisualizador() async {
@@ -932,16 +955,16 @@ class _HomeScreenState extends State<HomeScreen>
                       // Action indicator button / badge
                       Material(
                         color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                           side: const BorderSide(color: Color(0xFFE2E8F0)),
                         ),
                         child: InkWell(
                           onTap: _perm.podeVerAprovacoes
-                              ? () => AppShell.of(
-                                  context,
-                                ).goTo(AppPage.aprovacoes)
+                              ? () => AppShell.of(context).goTo(
+                                  AppPage.aprovacoes,
+                                  draftId: d['id'] as String,
+                                )
                               : null,
                           borderRadius: BorderRadius.circular(12),
                           child: const Padding(
@@ -1027,8 +1050,14 @@ class _HomeScreenState extends State<HomeScreen>
                   color: Colors.transparent,
                   borderRadius: BorderRadius.circular(16),
                   child: InkWell(
-                    onTap: () =>
-                        AppShell.of(context).goTo(m['page'] as AppPage),
+                    onTap: () {
+                      final page = m['page'] as AppPage;
+                      if (page == AppPage.precos) {
+                        AppShell.of(context).goToPrecos();
+                      } else {
+                        AppShell.of(context).goTo(page);
+                      }
+                    },
                     borderRadius: BorderRadius.circular(16),
                     hoverColor: const Color(0xFFF8FAFC),
                     child: Padding(

@@ -38,17 +38,44 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
   Future<void> _carregar() async {
     setState(() => _loading = true);
     try {
+      // 1. Busca os drafts
       final res = await _supabase
           .from('price_drafts')
           .select(
             'id, status, created_at, created_by_email, '
-            'reviewed_by_email, reviewed_at, '
-            'price_lists!master_list_id(description)',
+            'reviewed_by_email, reviewed_at, master_list_id',
           )
           .order('created_at', ascending: false);
 
+      final drafts = (res as List).cast<Map<String, dynamic>>();
+
+      // 2. Coleta os pltyps únicos
+      final pltyps = drafts
+          .map((d) => d['master_list_id']?.toString())
+          .whereType<String>()
+          .toSet()
+          .toList();
+
+      // 3. Busca as descrições
+      Map<String, String> descMap = {};
+      if (pltyps.isNotEmpty) {
+        final listas = await _supabase
+            .from('price_lists')
+            .select('pltyp, ptext')
+            .inFilter('pltyp', pltyps);
+        for (final l in listas as List) {
+          descMap[l['pltyp'].toString()] = l['ptext']?.toString() ?? '';
+        }
+      }
+
+      // 4. Enriquece cada draft com a descrição da lista
       setState(() {
-        _registros = (res as List).cast<Map<String, dynamic>>();
+        _registros = drafts.map((d) {
+          final m = Map<String, dynamic>.from(d);
+          final pltyp = m['master_list_id']?.toString();
+          m['price_lists'] = {'description': descMap[pltyp] ?? pltyp ?? ''};
+          return m;
+        }).toList();
       });
     } catch (e) {
       if (mounted) {
@@ -109,8 +136,16 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
 
   (String label, Color bg, Color fg) _statusConfig(String status) {
     return switch (status) {
-      'approved' => ('Aprovado', const Color(0xFFECFDF5), const Color(0xFF047857)),
-      'rejected' => ('Rejeitado', const Color(0xFFFFF1F2), const Color(0xFFB91C1C)),
+      'approved' => (
+        'Aprovado',
+        const Color(0xFFECFDF5),
+        const Color(0xFF047857),
+      ),
+      'rejected' => (
+        'Rejeitado',
+        const Color(0xFFFFF1F2),
+        const Color(0xFFB91C1C),
+      ),
       _ => ('Pendente', const Color(0xFFFFF7ED), const Color(0xFFC2410C)),
     };
   }
@@ -148,7 +183,9 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
           _topBarPremium(),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator(color: _laranja))
+                ? const Center(
+                    child: CircularProgressIndicator(color: _laranja),
+                  )
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -168,7 +205,13 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 32),
       decoration: const BoxDecoration(
         color: Colors.white,
-        boxShadow: [BoxShadow(color: Color(0x02000000), blurRadius: 15, offset: Offset(0, 4))],
+        boxShadow: [
+          BoxShadow(
+            color: Color(0x02000000),
+            blurRadius: 15,
+            offset: Offset(0, 4),
+          ),
+        ],
         border: Border(bottom: BorderSide(color: _slate100)),
       ),
       child: Row(
@@ -179,12 +222,21 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
             children: [
               Text(
                 'Histórico de Alterações',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: _slate900, letterSpacing: -0.5),
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                  color: _slate900,
+                  letterSpacing: -0.5,
+                ),
               ),
               Text(
                 'Auditoria completa de rascunhos, submissões e decisões comerciais anteriores',
-                style: TextStyle(fontSize: 12, color: _slate600, fontWeight: FontWeight.w500),
-              )
+                style: TextStyle(
+                  fontSize: 12,
+                  color: _slate600,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
             ],
           ),
           const Spacer(),
@@ -206,9 +258,21 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
   Widget _barraFiltros() {
     final tabs = [
       ('todos', 'Todos', _registros.length),
-      ('pending', 'Pendentes', _registros.where((r) => r['status'] == 'pending').length),
-      ('approved', 'Aprovados', _registros.where((r) => r['status'] == 'approved').length),
-      ('rejected', 'Rejeitados', _registros.where((r) => r['status'] == 'rejected').length),
+      (
+        'pending',
+        'Pendentes',
+        _registros.where((r) => r['status'] == 'pending').length,
+      ),
+      (
+        'approved',
+        'Aprovados',
+        _registros.where((r) => r['status'] == 'approved').length,
+      ),
+      (
+        'rejected',
+        'Rejeitados',
+        _registros.where((r) => r['status'] == 'rejected').length,
+      ),
     ];
 
     return Container(
@@ -237,7 +301,9 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
                   color: active ? _laranja.withOpacity(0.5) : _slate200,
                   width: active ? 1.5 : 1,
                 ),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
             );
           }),
@@ -249,8 +315,16 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
               style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
               decoration: InputDecoration(
                 hintText: 'Buscar tabela, criador ou auditor...',
-                hintStyle: const TextStyle(fontSize: 12, color: _slate400, fontWeight: FontWeight.w500),
-                prefixIcon: const Icon(Icons.search_rounded, size: 18, color: _slate600),
+                hintStyle: const TextStyle(
+                  fontSize: 12,
+                  color: _slate400,
+                  fontWeight: FontWeight.w500,
+                ),
+                prefixIcon: const Icon(
+                  Icons.search_rounded,
+                  size: 18,
+                  color: _slate600,
+                ),
                 isDense: true,
                 filled: true,
                 fillColor: _bgSuave,
@@ -282,7 +356,13 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: _slate200),
-          boxShadow: const [BoxShadow(color: Color(0x01000000), blurRadius: 20, offset: Offset(0, 8))],
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x01000000),
+              blurRadius: 20,
+              offset: Offset(0, 8),
+            ),
+          ],
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(
@@ -311,13 +391,24 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
                         children: [
                           Container(
                             padding: const EdgeInsets.all(16),
-                            decoration: const BoxDecoration(color: _bgSuave, shape: BoxShape.circle),
-                            child: Icon(Icons.history_toggle_off_rounded, size: 40, color: _slate400),
+                            decoration: const BoxDecoration(
+                              color: _bgSuave,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.history_toggle_off_rounded,
+                              size: 40,
+                              color: _slate400,
+                            ),
                           ),
                           const SizedBox(height: 12),
                           const Text(
                             'Nenhum registro localizado.',
-                            style: TextStyle(color: _slate900, fontWeight: FontWeight.w700, fontSize: 15),
+                            style: TextStyle(
+                              color: _slate900,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                            ),
                           ),
                           const SizedBox(height: 4),
                           const Text(
@@ -330,7 +421,8 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
                   : ListView.separated(
                       padding: EdgeInsets.zero,
                       itemCount: lista.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1, color: _slate100),
+                      separatorBuilder: (_, __) =>
+                          const Divider(height: 1, color: _slate100),
                       itemBuilder: (_, i) => _linha(lista[i]),
                     ),
             ),
@@ -364,13 +456,21 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
                       color: _laranja.withOpacity(0.08),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(Icons.description_outlined, size: 16, color: _laranja),
+                    child: const Icon(
+                      Icons.description_outlined,
+                      size: 16,
+                      color: _laranja,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
                       nomeLista,
-                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: _slate900),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                        color: _slate900,
+                      ),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -381,11 +481,22 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
               flex: 2,
               child: Center(
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: bg,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                   child: Text(
                     label,
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: fg, letterSpacing: 0.2),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: fg,
+                      letterSpacing: 0.2,
+                    ),
                   ),
                 ),
               ),
@@ -398,7 +509,11 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
               flex: 3,
               child: Text(
                 _fmtData(r['created_at']?.toString()),
-                style: const TextStyle(fontSize: 12, color: _slate600, fontWeight: FontWeight.w500),
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: _slate600,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
             Expanded(
@@ -409,7 +524,11 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
               flex: 3,
               child: Text(
                 _fmtData(r['reviewed_at']?.toString()),
-                style: const TextStyle(fontSize: 12, color: _slate600, fontWeight: FontWeight.w500),
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: _slate600,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
             const Icon(Icons.chevron_right_rounded, size: 20, color: _slate400),
@@ -421,7 +540,14 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
 
   Widget _emailCell(String? email) {
     if (email == null || email.isEmpty || email == 'desconhecido') {
-      return const Text('—', style: TextStyle(fontSize: 12, color: _slate400, fontWeight: FontWeight.w500));
+      return const Text(
+        '—',
+        style: TextStyle(
+          fontSize: 12,
+          color: _slate400,
+          fontWeight: FontWeight.w500,
+        ),
+      );
     }
     final inicial = email[0].toUpperCase();
     return Row(
@@ -432,14 +558,22 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
           backgroundColor: _laranja.withOpacity(0.08),
           child: Text(
             inicial,
-            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: _laranja),
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+              color: _laranja,
+            ),
           ),
         ),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
             email,
-            style: const TextStyle(fontSize: 12, color: _slate600, fontWeight: FontWeight.w500),
+            style: const TextStyle(
+              fontSize: 12,
+              color: _slate600,
+              fontWeight: FontWeight.w500,
+            ),
             overflow: TextOverflow.ellipsis,
           ),
         ),
@@ -447,13 +581,22 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
     );
   }
 
-  Widget _th(String label, {required int flex, TextAlign align = TextAlign.left}) {
+  Widget _th(
+    String label, {
+    required int flex,
+    TextAlign align = TextAlign.left,
+  }) {
     return Expanded(
       flex: flex,
       child: Text(
         label,
         textAlign: align,
-        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: _slate600, letterSpacing: 0.3),
+        style: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          color: _slate600,
+          letterSpacing: 0.3,
+        ),
       ),
     );
   }

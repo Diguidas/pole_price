@@ -18,12 +18,12 @@ class DraftAprovacao {
   });
 
   factory DraftAprovacao.fromJson(Map<String, dynamic> json) {
-    final priceList = json['price_lists'] as Map<String, dynamic>?;
-
     return DraftAprovacao(
       id: json['id']?.toString() ?? '',
       masterListName:
-          priceList?['description']?.toString() ?? 'Tabela Desconhecida',
+          json['lista_nome']?.toString() ??
+          json['master_list_id']?.toString() ??
+          'Tabela Desconhecida',
       status: json['status']?.toString() ?? 'pending',
       createdAt: json['created_at']?.toString() ?? '',
       createdByEmail: json['created_by_email']?.toString(),

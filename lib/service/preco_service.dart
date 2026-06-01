@@ -17,7 +17,10 @@ class PriceService {
   }
 
   Future<List<PriceList>> getLists() async {
-    final res = await supabase.from('price_lists').select().order('description');
+    final res = await supabase
+        .from('price_lists')
+        .select('pltyp, ptext')
+        .order('ptext');
     return (res as List).map((e) => PriceList.fromJson(e)).toList();
   }
 
@@ -40,7 +43,11 @@ class PriceService {
         .select('product_id, description, price')
         .eq('price_list_id', listId);
 
-    final round1 = await Future.wait<dynamic>([listFuture, periodFuture, matsFuture]);
+    final round1 = await Future.wait<dynamic>([
+      listFuture,
+      periodFuture,
+      matsFuture,
+    ]);
 
     final listRes = round1[0] as Map<String, dynamic>;
     final periodRes = round1[1] as Map<String, dynamic>?;
@@ -63,18 +70,18 @@ class PriceService {
 
     final Future<dynamic> cpvFuture = latestPeriod != null && codes.isNotEmpty
         ? supabase
-            .from('product_costs')
-            .select('product_code, cost_value')
-            .eq('period', latestPeriod)
-            .eq('classification', 'Real')
-            .inFilter('product_code', codes)
+              .from('product_costs')
+              .select('product_code, cost_value')
+              .eq('period', latestPeriod)
+              .eq('classification', 'Real')
+              .inFilter('product_code', codes)
         : Future<dynamic>.value(<dynamic>[]);
 
     final Future<dynamic> clusterFuture = codes.isNotEmpty
         ? supabase
-            .from('products')
-            .select('code, pricing_cluster_id')
-            .inFilter('code', codes)
+              .from('products')
+              .select('code, pricing_cluster_id')
+              .inFilter('code', codes)
         : Future<dynamic>.value(<dynamic>[]);
 
     final round2 = await Future.wait<dynamic>([cpvFuture, clusterFuture]);
@@ -176,15 +183,17 @@ class PriceService {
   }
 
   /// saveDraft agora recebe o email do criador e salva em created_by_email.
+  /// Inclui campos de vigência e origem SAP nos itens do draft.
   Future<String> saveDraft({
     required String? masterListId,
     required List<MaterialPreco> materiais,
     required List<String> targets,
     required List<RegraAjuste> regras,
+    String? modo, // 'lista' ou 'grupo'
+    String? kdgrp, // código do grupo SAP (apenas no modo grupo)
   }) async {
     // Pega o email do usuário logado via Supabase Auth (vem do Azure AD)
-    final userEmail =
-        supabase.auth.currentUser?.email ?? 'desconhecido';
+    final userEmail = supabase.auth.currentUser?.email ?? 'desconhecido';
 
     final draft = await supabase
         .from('price_drafts')
@@ -202,18 +211,30 @@ class PriceService {
     }
 
     final itens = materiais
-        .where((m) => m.novoPreco > 0 && m.novoPreco != m.precoAtual)
-        .map((m) => {
-              'draft_id': draftId,
-              'product_id': m.codigo.trim(),
-              'old_price': m.precoAtual,
-              'new_price': m.novoPreco,
-              'margin_pct': m.margemReal,
-            })
+        .where(
+          (m) => m.novoPreco > 0 && m.novoPreco != m.precoAtual && !m.removido,
+        )
+        .map(
+          (m) => {
+            'draft_id': draftId,
+            'product_id': m.codigo.trim(),
+            'old_price': m.precoAtual,
+            'new_price': m.novoPreco,
+            'margin_pct': m.margemReal,
+            'datab': m.datab,
+            'datbi': m.datbi,
+            'kdgrp': kdgrp,
+            'modo': modo,
+            'origem_material': m.origemMaterial == OrigemMaterial.manual
+                ? 'manual'
+                : 'sap',
+          },
+        )
         .toList();
 
-    final targetRows =
-        targets.map((e) => {'draft_id': draftId, 'target_list_id': e}).toList();
+    final targetRows = targets
+        .map((e) => {'draft_id': draftId, 'target_list_id': e})
+        .toList();
 
     final excRows = regras.map((r) {
       return {
@@ -227,8 +248,8 @@ class PriceService {
         'reference_desc': r.nivel == 'Grupo'
             ? r.clusterNome
             : r.nivel == 'Material'
-                ? r.materialNome
-                : null,
+            ? r.materialNome
+            : null,
       };
     }).toList();
 
@@ -237,10 +258,14 @@ class PriceService {
       insertFutures.add(supabase.from('price_draft_items').insert(itens));
     }
     if (targetRows.isNotEmpty) {
-      insertFutures.add(supabase.from('price_draft_targets').insert(targetRows));
+      insertFutures.add(
+        supabase.from('price_draft_targets').insert(targetRows),
+      );
     }
     if (excRows.isNotEmpty) {
-      insertFutures.add(supabase.from('price_draft_exceptions').insert(excRows));
+      insertFutures.add(
+        supabase.from('price_draft_exceptions').insert(excRows),
+      );
     }
     if (insertFutures.isNotEmpty) {
       await Future.wait<dynamic>(insertFutures);
@@ -254,9 +279,6 @@ class PriceService {
     await sapSync.pushToSap(draftId: draftId);
   }
 
-  Future<SapSyncResult> syncFromSap({String? listId}) =>
-      sapSync.syncFromSap(listId: listId);
-
   String _mapNivel(String n) {
     switch (n) {
       case 'Grupo':
@@ -265,6 +287,13 @@ class PriceService {
         return 'specific_material';
       default:
         return 'full_table';
+    }
+  }
+
+  Future<void> sincronizarCatalogo() async {
+    final res = await supabase.functions.invoke('sync-price-catalog');
+    if (res.status != 200) {
+      throw Exception('Falha ao sincronizar catálogo SAP (${res.status})');
     }
   }
 

@@ -45,36 +45,48 @@ class PricingPolicy {
 }
 
 class PolicyPriceList {
-  final String id;
-  final String description;
+  final String pltyp;       // PK da tabela price_lists (antes: id)
+  final String ptext;       // descrição da lista       (antes: description)
   final String? regraExclusiva;
 
   PolicyPriceList({
-    required this.id,
-    required this.description,
+    required this.pltyp,
+    required this.ptext,
     this.regraExclusiva,
   });
 
+  // Mantém getters com os nomes antigos para não quebrar a UI
+  String get id => pltyp;
+  String get description => ptext;
+
   factory PolicyPriceList.fromJson(Map<String, dynamic> json) {
     return PolicyPriceList(
-      id: json['id'] ?? '',
-      description: json['description'] ?? '',
+      pltyp: json['pltyp']?.toString() ?? '',
+      ptext: json['ptext'] ?? '',
       regraExclusiva: json['regra_exclusiva'],
     );
   }
 }
 
 class AllPriceList {
-  final String id;
-  final String description;
+  final String pltyp;       // PK da tabela price_lists (antes: id)
+  final String ptext;       // descrição da lista       (antes: description)
   final String? policyId;
 
-  AllPriceList({required this.id, required this.description, this.policyId});
+  AllPriceList({
+    required this.pltyp,
+    required this.ptext,
+    this.policyId,
+  });
+
+  // Mantém getters com os nomes antigos para não quebrar a UI
+  String get id => pltyp;
+  String get description => ptext;
 
   factory AllPriceList.fromJson(Map<String, dynamic> json) {
     return AllPriceList(
-      id: json['id'] ?? '',
-      description: json['description'] ?? '',
+      pltyp: json['pltyp']?.toString() ?? '',
+      ptext: json['ptext'] ?? '',
       policyId: json['policy_id'],
     );
   }

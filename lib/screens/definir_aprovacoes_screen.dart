@@ -48,16 +48,37 @@ class _AprovacoesScreenState extends State<AprovacoesScreen> {
     try {
       final response = await Supabase.instance.client
           .from('price_drafts')
-          .select(
-            'id, status, created_at, master_list_id, created_by_email, '
-            'price_lists!master_list_id(description)',
-          )
+          .select('id, status, created_at, master_list_id, created_by_email')
           .eq('status', 'pending')
           .order('created_at', ascending: false);
 
-      final lista = (response as List)
-          .map((j) => DraftAprovacao.fromJson(j))
+      final drafts = response as List;
+
+      // Busca nomes das listas pelo pltyp
+      final pltyps = drafts
+          .map((d) => d['master_list_id']?.toString())
+          .whereType<String>()
+          .toSet()
           .toList();
+
+      final Map<String, String> nomePorPltyp = {};
+      if (pltyps.isNotEmpty) {
+        final listasRes = await Supabase.instance.client
+            .from('price_lists')
+            .select('pltyp, ptext')
+            .inFilter('pltyp', pltyps);
+        for (final l in listasRes as List) {
+          nomePorPltyp[l['pltyp'].toString()] = l['ptext']?.toString() ?? '';
+        }
+      }
+
+      final lista = drafts.map((j) {
+        final pltyp = j['master_list_id']?.toString();
+        return DraftAprovacao.fromJson({
+          ...j,
+          'lista_nome': nomePorPltyp[pltyp] ?? pltyp ?? '',
+        });
+      }).toList();
 
       setState(() => _rascunhosPendentes = lista);
 

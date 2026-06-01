@@ -6,22 +6,35 @@ class PricingPolicyService {
 
   PricingPolicyService(this.supabase);
 
-  /// Busca todas as políticas com as listas vinculadas
   Future<List<PricingPolicy>> getPolicies() async {
-    final res = await supabase
+    final policiesRes = await supabase
         .from('pricing_policies')
-        .select('*, price_lists(id, description, regra_exclusiva)')
+        .select('*')
         .order('name');
 
-    return (res as List).map((e) => PricingPolicy.fromJson(e)).toList();
+    final listsRes = await supabase
+        .from('price_lists')
+        .select('pltyp, ptext, policy_id')
+        .not('policy_id', 'is', null);
+
+    final Map<String, List<Map<String, dynamic>>> listsByPolicy = {};
+    for (final list in listsRes as List) {
+      final pid = list['policy_id'] as String?;
+      if (pid != null) listsByPolicy.putIfAbsent(pid, () => []).add(list);
+    }
+
+    return (policiesRes as List).map((policy) {
+      final enriched = Map<String, dynamic>.from(policy);
+      enriched['price_lists'] = listsByPolicy[policy['id']] ?? [];
+      return PricingPolicy.fromJson(enriched);
+    }).toList();
   }
 
-  /// Busca todas as price_lists (independente de vínculo)
   Future<List<AllPriceList>> getAllPriceLists() async {
     final res = await supabase
         .from('price_lists')
-        .select('id, description, policy_id')
-        .order('description');
+        .select('pltyp, ptext, policy_id')
+        .order('ptext');
 
     return (res as List).map((e) => AllPriceList.fromJson(e)).toList();
   }
@@ -51,12 +64,15 @@ class PricingPolicyService {
     required double? margemOferta,
     String? descricao,
   }) async {
-    await supabase.from('pricing_policies').update({
-      'name': name,
-      'margem_flat': margemFlat,
-      'margem_oferta': margemOferta,
-      'descricao': descricao,
-    }).eq('id', id);
+    await supabase
+        .from('pricing_policies')
+        .update({
+          'name': name,
+          'margem_flat': margemFlat,
+          'margem_oferta': margemOferta,
+          'descricao': descricao,
+        })
+        .eq('id', id);
   }
 
   /// Exclui uma política (desvincula as listas antes)

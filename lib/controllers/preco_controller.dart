@@ -7,9 +7,10 @@ import 'package:pole_price/service/preco_service.dart';
 import 'package:pole_price/service/sap_sync_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+enum SapModo { lista, grupo }
+
 class PrecoController extends ChangeNotifier {
   // ── Singleton por sessão ─────────────────────────────────────────────
-  // Evita que targets e regras sejam perdidos ao navegar entre telas.
   static PrecoController? _instance;
 
   static PrecoController get instance {
@@ -29,6 +30,7 @@ class PrecoController extends ChangeNotifier {
 
   final PriceService service;
 
+  // ── Estado principal ─────────────────────────────────────────────────
   List<PriceList> listas = [];
   List<MaterialPreco> materiais = [];
   List<MaterialPreco> filtrados = [];
@@ -44,16 +46,29 @@ class PrecoController extends ChangeNotifier {
 
   String? filtroClusterId;
 
-  void filtrarPorCluster(String clusterId) {
-    filtroClusterId = clusterId;
-    filtrados = materiais.where((m) => m.clusterId == clusterId).toList();
-    notifyListeners();
-  }
+  // ── Estado SAP (novo) ────────────────────────────────────────────────
+  SapModo modo = SapModo.lista;
+  String? pltyp; // código da lista SAP selecionada
+  String? kdgrp; // código do grupo (só em modo grupo)
+  DateTime? datab; // início da vigência
+  DateTime? datbi; // fim da vigência
+  // Em PrecoController (junto com datab/datbi):
+  String? databOp; // ex: 'GE', 'EQ', 'LE', 'NE'
+  String? datbiOp;
 
+  // ── Clusters ─────────────────────────────────────────────────────────
   List<PricingClusterItem> clusters = [];
   List<MaterialPreco> materiaisDoCluster = [];
   bool loadingClusters = false;
   bool loadingMateriaisCluster = false;
+
+  void filtrarPorCluster(String clusterId) {
+    filtroClusterId = clusterId;
+    filtrados = materiais
+        .where((m) => m.clusterId == clusterId && !m.removido)
+        .toList();
+    notifyListeners();
+  }
 
   Future<void> carregarClusters() async {
     if (clusters.isNotEmpty) return;
@@ -88,7 +103,6 @@ class PrecoController extends ChangeNotifier {
   }
 
   Future<void> init() async {
-    // Se já tiver listas carregadas, não recarrega — preserva o estado.
     if (listas.isNotEmpty) return;
 
     loading = true;
@@ -97,6 +111,12 @@ class PrecoController extends ChangeNotifier {
 
     try {
       listas = await service.getLists();
+
+      // Tabela vazia → busca catálogo do SAP e recarrega
+      if (listas.isEmpty) {
+        await service.sincronizarCatalogo();
+        listas = await service.getLists();
+      }
     } catch (e) {
       erro = 'Erro ao carregar listas de preço: $e';
     } finally {
@@ -105,7 +125,16 @@ class PrecoController extends ChangeNotifier {
     }
   }
 
-  /// Força recarregamento das listas (ex: após sync SAP).
+  /// Chama a edge function sync-price-catalog para popular price_lists e price_groups.
+  Future<void> _sincronizarCatalogo() async {
+    final res = await service.supabase.functions.invoke('sync-price-catalog');
+    if (res.status != 200) {
+      throw Exception('Falha ao sincronizar catálogo SAP (${res.status})');
+    }
+    // Recarrega após sincronizar
+    listas = await service.getLists();
+  }
+
   Future<void> recarregarListas() async {
     loading = true;
     erro = null;
@@ -113,6 +142,12 @@ class PrecoController extends ChangeNotifier {
 
     try {
       listas = await service.getLists();
+
+      // Mesma lógica: catálogo vazio → sincroniza
+      if (listas.isEmpty) {
+        await service.sincronizarCatalogo();
+        listas = await service.getLists();
+      }
 
       if (selecionada != null) {
         final id = selecionada!.id;
@@ -134,6 +169,7 @@ class PrecoController extends ChangeNotifier {
     await recarregarMateriais();
   }
 
+  /// @deprecated — use buscarDoSap(). Mantido para compatibilidade.
   Future<void> recarregarMateriais() async {
     if (selecionada == null) return;
     loading = true;
@@ -153,6 +189,80 @@ class PrecoController extends ChangeNotifier {
     }
   }
 
+  /// Busca os preços ao vivo do SAP conforme o modo configurado.
+  ///
+  /// Deve ser chamado no initState de PrecoScreen após receber os parâmetros
+  /// de navegação (modo, pltyp, kdgrp, datab, datbi).
+  Future<void> buscarDoSap() async {
+    if (pltyp == null || pltyp!.isEmpty) {
+      erro = 'Selecione uma lista SAP antes de buscar.';
+      notifyListeners();
+      return;
+    }
+    if (modo == SapModo.grupo && (kdgrp == null || kdgrp!.isEmpty)) {
+      erro = 'Selecione um grupo SAP para o modo Lista+Grupo.';
+      notifyListeners();
+      return;
+    }
+
+    loading = true;
+    erro = null;
+    notifyListeners();
+
+    try {
+      final databStr = _formatDate(datab);
+      final datbiStr = _formatDate(datbi);
+
+      if (modo == SapModo.lista) {
+        materiais = await service.sapSync.fetchFromSapLista(
+          pltyp: pltyp!,
+          datab: databStr,
+          datbi: datbiStr,
+          databOp: databOp, // NOVO
+          datbiOp: datbiOp, // NOVO
+        );
+      } else {
+        materiais = await service.sapSync.fetchFromSapGrupo(
+          pltyp: pltyp!,
+          kdgrp: kdgrp!,
+          datab: databStr,
+          datbi: datbiStr,
+          databOp: databOp, // NOVO
+          datbiOp: datbiOp, //
+        );
+      }
+
+      debugPrint('buscarDoSap: ${materiais.length} materiais recebidos');
+      if (materiais.isNotEmpty)
+        debugPrint(
+          'Primeiro: ${materiais.first.codigo} - ${materiais.first.description} - ${materiais.first.precoAtual}',
+        );
+
+      filtrados = materiais.where((m) => !m.removido).toList();
+    } catch (e) {
+      erro = 'Erro ao buscar do SAP: $e';
+      materiais = [];
+      filtrados = [];
+    } finally {
+      loading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Remove um material da sessão de edição (apenas local, não afeta o SAP).
+  void removerMaterial(MaterialPreco m) {
+    m.removido = true;
+    filtrados = materiais.where((m) => !m.removido).toList();
+    notifyListeners();
+  }
+
+  /// Adiciona um material buscado manualmente (origem = manual).
+  void adicionarMaterial(MaterialPreco m) {
+    materiais.add(m);
+    filtrados = materiais.where((m) => !m.removido).toList();
+    notifyListeners();
+  }
+
   void atualizarPreco(MaterialPreco m, double novo) {
     m.novoPreco = novo;
     notifyListeners();
@@ -160,8 +270,9 @@ class PrecoController extends ChangeNotifier {
 
   void buscar(String q) {
     filtrados = materiais.where((m) {
-      return m.codigo.contains(q) ||
-          m.description.toLowerCase().contains(q.toLowerCase());
+      return !m.removido &&
+          (m.codigo.contains(q) ||
+              m.description.toLowerCase().contains(q.toLowerCase()));
     }).toList();
     notifyListeners();
   }
@@ -172,26 +283,9 @@ class PrecoController extends ChangeNotifier {
       materiais: materiais,
       targets: targets,
       regras: regras,
+      modo: modo == SapModo.grupo ? 'grupo' : 'lista',
+      kdgrp: kdgrp,
     );
-  }
-
-  Future<SapSyncResult> atualizarDoSap() async {
-    syncingSap = true;
-    erro = null;
-    notifyListeners();
-    try {
-      final result = await service.syncFromSap(listId: selecionada?.id);
-      if (selecionada != null) {
-        await selecionarLista(selecionada!);
-      }
-      return result;
-    } catch (e) {
-      erro = 'Erro ao sincronizar do SAP: $e';
-      rethrow;
-    } finally {
-      syncingSap = false;
-      notifyListeners();
-    }
   }
 
   void toggleTarget(String id) {
@@ -216,5 +310,16 @@ class PrecoController extends ChangeNotifier {
   void limparErro() {
     erro = null;
     notifyListeners();
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────
+
+  /// Converte DateTime para o formato SAP (YYYYMMDD).
+  String? _formatDate(DateTime? dt) {
+    if (dt == null) return null;
+    final y = dt.year.toString().padLeft(4, '0');
+    final m = dt.month.toString().padLeft(2, '0');
+    final d = dt.day.toString().padLeft(2, '0');
+    return '$y$m$d';
   }
 }

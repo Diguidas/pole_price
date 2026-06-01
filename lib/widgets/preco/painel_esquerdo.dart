@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:pole_price/controllers/preco_controller.dart';
+import 'package:pole_price/models/material_preco.dart';
 import 'package:pole_price/widgets/tabela_precos.dart';
 import 'package:pole_price/widgets/preco/seletor_lista_mae.dart';
+import 'package:pole_price/widgets/preco/busca_material_sheet.dart';
 
 const _laranja = Color(0xFFFF6B00);
 
@@ -11,6 +13,8 @@ class PainelEsquerdo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final temDados = controller.materiais.isNotEmpty;
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -30,43 +34,19 @@ class PainelEsquerdo extends StatelessWidget {
                     _numeroBadge('1'),
                     const SizedBox(width: 10),
                     const Text(
-                      'Lista mãe (base)',
+                      'Materiais',
                       style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                     ),
+                    const Spacer(),
+                    // ── Botão adicionar material ──────────────────────
+                    if (temDados)
+                      TextButton.icon(
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text('Adicionar material'),
+                        style: TextButton.styleFrom(foregroundColor: _laranja),
+                        onPressed: () => _abrirBuscaMaterial(context),
+                      ),
                   ],
-                ),
-                const SizedBox(height: 14),
-                InkWell(
-                  onTap: () => abrirSeletorListaMae(context, controller),
-                  borderRadius: BorderRadius.circular(8),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      border: Border.all(color: Colors.grey.shade300),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.table_chart_outlined, color: _laranja),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            controller.selecionada != null
-                                ? controller.selecionada!.description
-                                : 'Clique para pesquisar e selecionar a lista...',
-                            style: TextStyle(
-                              color: controller.selecionada != null
-                                  ? Colors.black87
-                                  : Colors.grey.shade600,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ),
-                        const Icon(Icons.arrow_drop_down, color: Colors.grey),
-                      ],
-                    ),
-                  ),
                 ),
                 const SizedBox(height: 10),
                 TextField(
@@ -91,7 +71,7 @@ class PainelEsquerdo extends StatelessWidget {
             ),
           ),
 
-          if (controller.selecionada != null)
+          if (temDados)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
               decoration: BoxDecoration(
@@ -108,26 +88,43 @@ class PainelEsquerdo extends StatelessWidget {
                   _colHeader('Preço Atual (R\$)', flex: 2, align: TextAlign.right),
                   _colHeader('Novo Preço (R\$)', flex: 2, align: TextAlign.right),
                   _colHeader('Margem (%)', flex: 2, align: TextAlign.right),
+                  _colHeader('Vigência', flex: 2, align: TextAlign.right),
+                  // Coluna do botão remover (sem label)
+                  const SizedBox(width: 36),
                 ],
               ),
             ),
 
           Expanded(child: TabelaPrecos(controller: controller)),
 
-          if (controller.selecionada != null)
+          if (temDados)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
               decoration: BoxDecoration(
                 border: Border(top: BorderSide(color: Colors.grey.shade200)),
               ),
               child: Text(
-                'Exibindo ${controller.filtrados.length} de ${controller.materiais.length} materiais',
+                'Exibindo ${controller.filtrados.length} de ${controller.materiais.where((m) => !m.removido).length} materiais',
                 style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
               ),
             ),
         ],
       ),
     );
+  }
+
+  Future<void> _abrirBuscaMaterial(BuildContext context) async {
+    final material = await showModalBottomSheet<MaterialPreco>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => BuscaMaterialSheet(controller: controller),
+    );
+    if (material != null) {
+      controller.adicionarMaterial(material);
+    }
   }
 
   Widget _colHeader(String label, {int flex = 1, TextAlign align = TextAlign.left}) {
