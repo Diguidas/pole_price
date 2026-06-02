@@ -12,6 +12,8 @@ import 'package:pole_price/screens/politicas_screen.dart';
 import 'package:pole_price/screens/relatorio_screen.dart';
 import 'package:pole_price/screens/config_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:pole_price/widgets/lista_picker.dart';
+import 'package:pole_price/widgets/grupo_picker.dart';
 
 enum AppPage {
   home,
@@ -249,10 +251,10 @@ class _AppSidebarState extends State<_AppSidebar> {
                             const SizedBox(width: 8),
                             Expanded(
                               child: Image.asset(
-                                'assets/logon.png',
-                                height: 50,
+                                'assets/logo_branca.png',
+                                height: 200,
                                 alignment: Alignment.centerLeft,
-                                color: _brancoPuro,
+                                
                                 errorBuilder: (_, __, ___) => const Text(
                                   'Pole Price',
                                   style: TextStyle(
@@ -441,8 +443,8 @@ class _ModoPrecoDialogState extends State<_ModoPrecoDialog> {
 
   String? _pltypSelecionado;
   String? _kdgrpSelecionado;
-  DateFilter _datab = DateFilter(op: DateOp.gte, date: DateTime.now());
-  DateFilter? _datbi;
+  DateFilter _datab = DateFilter(op: DateOp.lte, date: DateTime.now());
+  DateFilter _datbi = DateFilter(op: DateOp.gte, date: DateTime.now());
 
   final _supabase = Supabase.instance.client;
 
@@ -612,21 +614,16 @@ class _ModoPrecoDialogState extends State<_ModoPrecoDialog> {
               const SizedBox(height: 8),
               _carregando
                   ? const _LoadingField()
-                  : _dropdown(
+                  : _pickerButton(
                       hint: 'Selecione a lista',
-                      value: _pltypSelecionado,
-                      items: _listas
-                          .map(
-                            (l) => DropdownMenuItem<String>(
-                              value: l['pltyp'] as String,
-                              child: Text(
-                                '${l['pltyp']}  —  ${l['ptext'] ?? ''}',
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (v) => setState(() => _pltypSelecionado = v),
+                      value: _pltypSelecionado != null
+                          ? '$_pltypSelecionado  —  ${_listas.firstWhere((l) => l["pltyp"] == _pltypSelecionado, orElse: () => {"ptext": ""})["ptext"]}'
+                          : null,
+                      icon: Icons.list_alt_rounded,
+                      onTap: () async {
+                        final ref = await showListaPicker(context);
+                        if (ref != null) setState(() => _pltypSelecionado = ref.pltyp);
+                      },
                     ),
 
               // ── Seletor de grupo (condicional) ──
@@ -636,21 +633,16 @@ class _ModoPrecoDialogState extends State<_ModoPrecoDialog> {
                 const SizedBox(height: 8),
                 _carregando
                     ? const _LoadingField()
-                    : _dropdown(
+                    : _pickerButton(
                         hint: 'Selecione o grupo',
-                        value: _kdgrpSelecionado,
-                        items: _grupos
-                            .map(
-                              (g) => DropdownMenuItem<String>(
-                                value: g['kdgrp'] as String,
-                                child: Text(
-                                  '${g['kdgrp']}  —  ${g['ktext'] ?? ''}',
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (v) => setState(() => _kdgrpSelecionado = v),
+                        value: _kdgrpSelecionado != null
+                            ? '$_kdgrpSelecionado  —  ${_grupos.firstWhere((g) => g["kdgrp"] == _kdgrpSelecionado, orElse: () => {"ktext": ""})["ktext"]}'
+                            : null,
+                        icon: Icons.account_tree_rounded,
+                        onTap: () async {
+                          final ref = await showGrupoPicker(context);
+                          if (ref != null) setState(() => _kdgrpSelecionado = ref.kdgrp);
+                        },
                       ),
               ],
 
@@ -717,9 +709,9 @@ class _ModoPrecoDialogState extends State<_ModoPrecoDialog> {
                                 pltyp: _pltypSelecionado!,
                                 kdgrp: _kdgrpSelecionado,
                                 datab: _datab.date,
-                                datbi: _datbi?.date,
+                                datbi: _datbi.date,
                                 databOp: _datab.op.sapOp,
-                                datbiOp: _datbi?.op.sapOp,
+                                datbiOp: _datbi.op.sapOp,
                               ),
                             )
                           : null,
@@ -902,6 +894,44 @@ class _ModoPrecoDialogState extends State<_ModoPrecoDialog> {
               ],
             ),
           ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _pickerButton({
+    required String hint,
+    required String? value,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: value != null ? _corLaranja : _corBorda,
+          width: value != null ? 1.5 : 1.0,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: value != null ? _corLaranja : _corSubtexto),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              value ?? hint,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: value != null ? FontWeight.w600 : FontWeight.w400,
+                color: value != null ? _corTexto : _corSubtexto,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Icon(Icons.expand_more_rounded, size: 18, color: value != null ? _corLaranja : _corSubtexto),
         ],
       ),
     ),

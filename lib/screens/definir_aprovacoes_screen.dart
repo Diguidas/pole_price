@@ -1,8 +1,10 @@
 // definir_aprovacoes_screen.dart
 // Fatorado em widgets privados para manter o arquivo legível.
 import 'package:flutter/material.dart';
+import 'package:pole_price/controllers/permissao_controller.dart';
 import 'package:pole_price/models/draft_aprova_model.dart';
 import 'package:pole_price/service/draft_pricing_service.dart';
+import 'package:pole_price/service/preco_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -128,9 +130,11 @@ class _AprovacoesScreenState extends State<AprovacoesScreen> {
       final reviewerEmail =
           Supabase.instance.client.auth.currentUser?.email ?? 'desconhecido';
 
-      final qtd = await _draftService.applyDraft(draftId);
+      // Envia ao SAP e salva no Supabase (applyDraft + pushToSap)
+      final priceService = PriceService(Supabase.instance.client);
+      await priceService.approveDraft(draftId);
 
-      // Salva quem aprovou
+      // Salva quem aprovou e quando
       await Supabase.instance.client
           .from('price_drafts')
           .update({
@@ -139,7 +143,7 @@ class _AprovacoesScreenState extends State<AprovacoesScreen> {
           })
           .eq('id', draftId);
 
-      _snack('$qtd preço(s) publicados com sucesso.', Colors.green);
+      _snack('Preços publicados com sucesso no SAP e Supabase.', Colors.green);
       _limparSelecao();
       _buscarRascunhosPendentes();
     } catch (e) {
@@ -286,6 +290,7 @@ class _AprovacoesScreenState extends State<AprovacoesScreen> {
                     listasExpandidas: _listasExpandidas,
                     kpis: kpis,
                     aprovando: _aprovando,
+                    podeAprovar: PermissaoController.instance.podeAprovar,
                     countListasFilhas: _countListasFilhas(),
                     gruposOrdenados: _gruposOrdenados(),
                     materiaisFiltrados: _materiaisFiltrados,
@@ -519,6 +524,7 @@ class _PainelDetalhes extends StatelessWidget {
   final Set<String> listasExpandidas;
   final _KpiData? kpis;
   final bool aprovando;
+  final bool podeAprovar;
   final int countListasFilhas;
   final List<MapEntry<String, List<Map<String, dynamic>>>> gruposOrdenados;
   final List<Map<String, dynamic>> Function(List<Map<String, dynamic>>)
@@ -538,6 +544,7 @@ class _PainelDetalhes extends StatelessWidget {
     required this.listasExpandidas,
     required this.kpis,
     required this.aprovando,
+    required this.podeAprovar,
     required this.countListasFilhas,
     required this.gruposOrdenados,
     required this.materiaisFiltrados,
@@ -556,6 +563,7 @@ class _PainelDetalhes extends StatelessWidget {
         _Cabecalho(
           draft: draft,
           aprovando: aprovando,
+          podeAprovar: podeAprovar,
           onAprovar: onAprovar,
           onRejeitar: onRejeitar,
         ),
@@ -607,12 +615,14 @@ class _Cabecalho extends StatelessWidget {
   static const _laranja = Color(0xFFFF6B00);
   final DraftAprovacao draft;
   final bool aprovando;
+  final bool podeAprovar;
   final VoidCallback onAprovar;
   final VoidCallback onRejeitar;
 
   const _Cabecalho({
     required this.draft,
     required this.aprovando,
+    required this.podeAprovar,
     required this.onAprovar,
     required this.onRejeitar,
   });
@@ -693,41 +703,62 @@ class _Cabecalho extends StatelessWidget {
               ),
               _badge('Pendente', _laranja.withOpacity(0.1), _laranja),
               const SizedBox(width: 12),
-              OutlinedButton(
-                onPressed: aprovando ? null : onRejeitar,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.red.shade700,
-                  side: BorderSide(color: Colors.red.shade300),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 14,
+              if (podeAprovar) ...[
+                OutlinedButton(
+                  onPressed: aprovando ? null : onRejeitar,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red.shade700,
+                    side: BorderSide(color: Colors.red.shade300),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 14,
+                    ),
+                  ),
+                  child: const Text('Rejeitar'),
+                ),
+                const SizedBox(width: 10),
+                ElevatedButton.icon(
+                  onPressed: aprovando ? null : onAprovar,
+                  icon: aprovando
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.check, size: 18),
+                  label: Text(aprovando ? 'Aprovando...' : 'Aprovar e publicar'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _laranja,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 14,
+                    ),
                   ),
                 ),
-                child: const Text('Rejeitar'),
-              ),
-              const SizedBox(width: 10),
-              ElevatedButton.icon(
-                onPressed: aprovando ? null : onAprovar,
-                icon: aprovando
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(Icons.check, size: 18),
-                label: Text(aprovando ? 'Aprovando...' : 'Aprovar e publicar'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _laranja,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 14,
+              ] else
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.lock_outline, size: 15, color: Colors.grey.shade400),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Aguardando aprovação de um responsável',
+                        style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
+                      ),
+                    ],
                   ),
                 ),
-              ),
             ],
           ),
         ],
@@ -1437,3 +1468,5 @@ extension _DraftFormat on DraftAprovacao {
     return createdAt;
   }
 }
+
+

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:pole_price/screens/login_page.dart';
+import 'package:pole_price/widgets/auth_guard.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 void main() async {
@@ -43,7 +44,9 @@ class SistemaPrecoApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const LoginPage(),
+      home: Supabase.instance.client.auth.currentSession != null
+          ? const AuthGuard()
+          : const LoginPage(),
     );
   }
 }

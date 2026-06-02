@@ -13,12 +13,24 @@ class MaterialPreco {
   final double? margemFlat;
   final double? margemOferta;
 
-  // Vigência do preço (formato SAP: YYYYMMDD)
-  final String? datab;
-  final String? datbi;
+  // Vigência do preço (formato SAP: YYYYMMDD) — mutável para edição por linha
+  String? datab;
+  String? datbi;
+  final bool bloqueado;
+  final bool inativo;
 
   // Preço sugerido por kg — vem do SAP junto com KBETR (campo KG_SUG / KBPER)
   final double? kgSug;
+
+  // Campos SAP necessários para o push de volta ao SAP
+  final String? konwa; // moeda (ex: BRL)
+  final String? kmein; // unidade de medida (ex: KG)
+  final String? krech; // regra de cálculo (ex: C)
+  final double? mxwrt; // valor máximo
+
+  // Status do preço na lista SAP: '' = normal, 'L' = bloqueado p/ liberação, 'X' = deletado
+  // Definido pelo usuário na tela de criação antes de salvar o draft.
+  String sapStatus;
 
   // Origem do material na sessão de edição
   final OrigemMaterial origemMaterial;
@@ -39,9 +51,16 @@ class MaterialPreco {
     this.datab,
     this.datbi,
     this.kgSug,
+    this.konwa,
+    this.kmein,
+    this.krech,
+    this.mxwrt,
+    this.sapStatus = '',
     this.origemMaterial = OrigemMaterial.sap,
     this.removido = false,
     this.novoPreco = 0,
+    required this.bloqueado,
+    required this.inativo,
   });
 
   factory MaterialPreco.fromJson(Map<String, dynamic> json) {
@@ -60,6 +79,8 @@ class MaterialPreco {
       origemMaterial: json['origem_material'] == 'manual'
           ? OrigemMaterial.manual
           : OrigemMaterial.sap,
+      bloqueado: json['bloqueado'] ?? false,
+      inativo: json['inativo'] ?? false,
     );
   }
 
@@ -73,8 +94,11 @@ class MaterialPreco {
 
   /// Margem calculada sobre o kg_sug (preço sugerido por kg do SAP)
   double? get margemSugerida {
-    if (kgSug == null || kgSug! <= 0 || cpv == null || cpv! <= 0) return null;
-    return (kgSug! - cpv!) / kgSug!;
+    final base = (kgSug != null && kgSug! > 0)
+        ? kgSug
+        : (precoAtual > 0 ? precoAtual : null);
+    if (base == null || cpv == null || cpv! <= 0) return null;
+    return (base - cpv!) / base;
   }
 
   /// Vigência formatada como DD/MM/AAAA — DD/MM/AAAA (ou aberta se datbi = 99991231)
@@ -93,7 +117,7 @@ class MaterialPreco {
 
   /// 'ok' | 'atencao' | 'sem margem' | 'sem-cpv'
   String get statusMargem {
-    final m = margemReal;
+    final m = margemSugerida ?? margemReal;
     if (m == null) return 'sem-cpv';
     if (margemFlat != null && m >= margemFlat!) return 'ok';
     if (margemOferta != null && m >= margemOferta!) return 'atencao';

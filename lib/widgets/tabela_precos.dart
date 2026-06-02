@@ -4,8 +4,13 @@ import 'package:pole_price/models/material_preco.dart';
 
 class TabelaPrecos extends StatelessWidget {
   final PrecoController controller;
+  final ScrollController scrollController;
 
-  const TabelaPrecos({super.key, required this.controller});
+  const TabelaPrecos({
+    super.key,
+    required this.controller,
+    required this.scrollController,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -44,13 +49,18 @@ class TabelaPrecos extends StatelessWidget {
         _cabecalho(),
         Expanded(
           child: ListView.builder(
+            controller: scrollController,
             itemCount: controller.filtrados.length,
             itemBuilder: (context, index) {
               final m = controller.filtrados[index];
               return _ItemMaterial(
+                key: ValueKey(m.codigo),
                 material: m,
                 isLast: index == controller.filtrados.length - 1,
                 onPrecoChanged: (novo) => controller.atualizarPreco(m, novo),
+                onPrecoConfirmado: (novo) =>
+                    controller.atualizarPreco(m, novo, promover: true),
+                onRemover: () => controller.removerMaterial(m),
               );
             },
           ),
@@ -61,15 +71,17 @@ class TabelaPrecos extends StatelessWidget {
 
   Widget _cabecalho() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
         color: const Color(0xFFF1F5F9),
         border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
       ),
       child: Row(
         children: [
-          _cabTxt('Código', flex: 2),
-          _cabTxt('Descrição / CPV', flex: 4),
+          // Borda status (3px) — espaçador
+          const SizedBox(width: 3),
+          const SizedBox(width: 8),
+          _cabTxt('Código / Descrição', flex: 5),
           _cabTxt('Vigência', flex: 3, align: TextAlign.center),
           _cabTxt('Preço SAP', flex: 2, align: TextAlign.right),
           _cabTxt('kg sug', flex: 2, align: TextAlign.right),
@@ -77,6 +89,7 @@ class TabelaPrecos extends StatelessWidget {
           _cabTxt('Novo Preço', flex: 2, align: TextAlign.right),
           const SizedBox(width: 6),
           _cabTxt('Margem', flex: 2, align: TextAlign.right),
+          const SizedBox(width: 32), // botão remover
         ],
       ),
     );
@@ -103,8 +116,15 @@ class TabelaPrecos extends StatelessWidget {
   }
 
   Widget _legenda(List<MaterialPreco> lista) {
-    int ok = 0, atencao = 0, semMargem = 0, semCpv = 0;
+    int ok = 0,
+        atencao = 0,
+        semMargem = 0,
+        semCpv = 0,
+        bloqueados = 0,
+        inativos = 0;
     for (final m in lista) {
+      if (m.bloqueado) bloqueados++;
+      if (m.inativo) inativos++;
       switch (m.statusMargem) {
         case 'ok':
           ok++;
@@ -121,7 +141,7 @@ class TabelaPrecos extends StatelessWidget {
     }
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
         color: Colors.grey.shade50,
         border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
@@ -150,19 +170,37 @@ class TabelaPrecos extends StatelessWidget {
             const SizedBox(width: 14),
             _legendaItem(Colors.grey, '$semCpv sem CPV'),
           ],
+          if (bloqueados > 0) ...[
+            const SizedBox(width: 14),
+            _legendaItem(
+              Colors.red.shade400,
+              '$bloqueados bloqueado',
+              icon: Icons.lock_outline,
+            ),
+          ],
+          if (inativos > 0) ...[
+            const SizedBox(width: 14),
+            _legendaItem(
+              Colors.orange.shade700,
+              '$inativos inativo',
+              icon: Icons.pause_circle_outline,
+            ),
+          ],
         ],
       ),
     );
   }
 
-  Widget _legendaItem(Color cor, String label) {
+  Widget _legendaItem(Color cor, String label, {IconData? icon}) {
     return Row(
       children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(color: cor, shape: BoxShape.circle),
-        ),
+        icon != null
+            ? Icon(icon, size: 8, color: cor)
+            : Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(color: cor, shape: BoxShape.circle),
+              ),
         const SizedBox(width: 5),
         Text(
           label,
@@ -178,11 +216,16 @@ class TabelaPrecos extends StatelessWidget {
 class _ItemMaterial extends StatefulWidget {
   final MaterialPreco material;
   final ValueChanged<double> onPrecoChanged;
+  final ValueChanged<double> onPrecoConfirmado;
+  final VoidCallback onRemover;
   final bool isLast;
 
   const _ItemMaterial({
+    super.key,
     required this.material,
     required this.onPrecoChanged,
+    required this.onPrecoConfirmado,
+    required this.onRemover,
     this.isLast = false,
   });
 
@@ -191,22 +234,40 @@ class _ItemMaterial extends StatefulWidget {
 }
 
 class _ItemMaterialState extends State<_ItemMaterial> {
-  late final TextEditingController _ctrl;
+  late final TextEditingController _precoCtrl;
+  late final FocusNode _precoFocus;
 
   @override
   void initState() {
     super.initState();
-    _ctrl = TextEditingController(
-      text: widget.material.novoPreco > 0
-          ? widget.material.novoPreco.toStringAsFixed(2)
-          : '',
+    final m = widget.material;
+    _precoCtrl = TextEditingController(
+      text: m.novoPreco > 0 ? m.novoPreco.toStringAsFixed(2) : '',
     );
+    _precoFocus = FocusNode()
+      ..addListener(() {
+        if (!_precoFocus.hasFocus) {
+          // Propaga ao perder foco (usuário rola a lista, toca em outro campo etc.)
+          final val =
+              double.tryParse(_precoCtrl.text.replaceAll(',', '.')) ?? 0;
+          widget.onPrecoChanged(val);
+        }
+      });
   }
 
   @override
   void dispose() {
-    _ctrl.dispose();
+    _precoCtrl.dispose();
+    _precoFocus.dispose();
     super.dispose();
+  }
+
+  bool get _temRestricao =>
+      widget.material.bloqueado || widget.material.inativo;
+
+  Color get _corBordaEsquerda {
+    if (_temRestricao) return Colors.red.shade400;
+    return _corStatus(widget.material.statusMargem);
   }
 
   @override
@@ -221,29 +282,19 @@ class _ItemMaterialState extends State<_ItemMaterial> {
           bottom: BorderSide(
             color: widget.isLast ? Colors.transparent : Colors.grey.shade100,
           ),
-          left: BorderSide(color: _corStatus(status), width: 3),
+          left: BorderSide(color: _corBordaEsquerda, width: 3),
         ),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // ── Código ──────────────────────────────────────────────
-            Expanded(
-              flex: 2,
-              child: Text(
-                m.codigo,
-                style: TextStyle(
-                  fontSize: 11,
-                  color: Colors.grey.shade500,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ),
+            const SizedBox(width: 8),
 
-            // ── Descrição + CPV ──────────────────────────────────────
+            // ── Código + Descrição (2 linhas compactas) ──────────────
             Expanded(
-              flex: 4,
+              flex: 5,
               child: Tooltip(
                 richMessage: _tooltipContent(m),
                 preferBelow: true,
@@ -253,7 +304,24 @@ class _ItemMaterialState extends State<_ItemMaterial> {
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
+                    Row(
+                      children: [
+                        Text(
+                          m.codigo,
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.grey.shade500,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                        if (_temRestricao) ...[
+                          const SizedBox(width: 6),
+                          _chipRestricao(m),
+                        ],
+                      ],
+                    ),
                     Text(
                       m.description,
                       style: const TextStyle(
@@ -275,7 +343,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
               ),
             ),
 
-            // ── Vigência ─────────────────────────────────────────────
+            // ── Vigência (só leitura — vem do SAP) ───────────────────
             Expanded(
               flex: 3,
               child: Text(
@@ -302,6 +370,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
               flex: 2,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     m.kgSug != null
@@ -336,7 +405,8 @@ class _ItemMaterialState extends State<_ItemMaterial> {
             Expanded(
               flex: 2,
               child: TextField(
-                controller: _ctrl,
+                controller: _precoCtrl,
+                focusNode: _precoFocus,
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
@@ -373,9 +443,13 @@ class _ItemMaterialState extends State<_ItemMaterial> {
                   ),
                 ),
                 onChanged: (v) {
-                  final val = double.tryParse(v.replaceAll(',', '.')) ?? 0;
-                  widget.onPrecoChanged(val);
+                  // Apenas atualiza a UI localmente — NÃO chama notifyListeners a cada tecla
                   setState(() {});
+                },
+                onSubmitted: (v) {
+                  final val = double.tryParse(v.replaceAll(',', '.')) ?? 0;
+                  widget.onPrecoConfirmado(val);
+                  FocusScope.of(context).unfocus();
                 },
               ),
             ),
@@ -384,7 +458,67 @@ class _ItemMaterialState extends State<_ItemMaterial> {
 
             // ── Margem / semáforo ─────────────────────────────────────
             Expanded(flex: 2, child: _semaforo(m)),
+
+            // ── Botão remover ─────────────────────────────────────────
+            IconButton(
+              icon: Icon(
+                Icons.delete_outline,
+                size: 16,
+                color: Colors.grey.shade400,
+              ),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              tooltip: 'Remover material',
+              onPressed: widget.onRemover,
+            ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _chipRestricao(MaterialPreco m) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (m.bloqueado)
+          _chip(
+            'BLOQUEADO',
+            Colors.red.shade700,
+            Colors.red.shade50,
+            Colors.red.shade200,
+          ),
+        if (m.bloqueado && m.inativo) const SizedBox(width: 4),
+        if (m.inativo)
+          _chip(
+            'INATIVO',
+            Colors.orange.shade800,
+            Colors.orange.shade50,
+            Colors.orange.shade200,
+          ),
+      ],
+    );
+  }
+
+  Widget _chip(
+    String label,
+    Color textColor,
+    Color bgColor,
+    Color borderColor,
+  ) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(3),
+        border: Border.all(color: borderColor),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 9,
+          color: textColor,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );
@@ -397,18 +531,17 @@ class _ItemMaterialState extends State<_ItemMaterial> {
     if (m.cpv != null) lines.add('CPV: R\$ ${m.cpv!.toStringAsFixed(4)}');
     if (m.kgSug != null)
       lines.add('kg_sug SAP: R\$ ${m.kgSug!.toStringAsFixed(4)}');
-    if (m.margemFlat != null) {
+    if (m.margemFlat != null)
       lines.add(
         'Margem mín. (flat): ${(m.margemFlat! * 100).toStringAsFixed(1)}%',
       );
-    }
-    if (m.margemOferta != null) {
+    if (m.margemOferta != null)
       lines.add(
         'Margem mín. (oferta): ${(m.margemOferta! * 100).toStringAsFixed(1)}%',
       );
-    }
     lines.add('Vigência: ${m.vigenciaFormatada}');
-
+    if (m.bloqueado) lines.add('⚠ Material bloqueado (LOEVM_KO)');
+    if (m.inativo) lines.add('⚠ Material inativo (KZNEP)');
     return TextSpan(
       text: lines.join('\n'),
       style: const TextStyle(fontSize: 11, color: Colors.white, height: 1.6),
@@ -416,14 +549,12 @@ class _ItemMaterialState extends State<_ItemMaterial> {
   }
 
   Widget _semaforo(MaterialPreco m) {
-    final margem = m.margemReal;
+    final margem = m.margemSugerida ?? m.margemReal;
     final status = m.statusMargem;
-
     final temNovoPreco = m.novoPreco > 0;
     final variacaoPct = temNovoPreco && m.precoAtual > 0
         ? ((m.novoPreco - m.precoAtual) / m.precoAtual) * 100
         : null;
-
     final textoMargem = margem != null
         ? '${(margem * 100).toStringAsFixed(1)}%'
         : variacaoPct != null
@@ -432,6 +563,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.end,
@@ -503,7 +635,6 @@ class _ItemMaterialState extends State<_ItemMaterial> {
   }
 }
 
-// ── FontFeature helper (evita import desnecessário) ──────────────────────────
 class FontFeature {
   const FontFeature.tabularFigures();
 }

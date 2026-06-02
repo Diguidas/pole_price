@@ -118,6 +118,8 @@ class PriceService {
         margemFlat: margemFlat,
         margemOferta: margemOferta,
         clusterId: clusterMap[code],
+        bloqueado: false,
+        inativo: false,
       );
     }).toList();
   }
@@ -178,21 +180,30 @@ class PriceService {
         description: p['name'] ?? '',
         precoAtual: 0,
         clusterId: clusterId,
+        bloqueado: false,
+        inativo: false,
       );
     }).toList();
   }
 
-  /// saveDraft agora recebe o email do criador e salva em created_by_email.
-  /// Inclui campos de vigência e origem SAP nos itens do draft.
+  /// Cria o draft no Supabase com todos os campos necessários para o push ao SAP.
+  ///
+  /// [sapStatus]: status SAP aplicado a todos os itens do draft.
+  ///   '' = ativo/normal, 'L' = bloqueado p/ liberação, 'X' = deletado.
+  /// Os campos konwa, kmein, krech, mxwrt vêm diretamente do MaterialPreco
+  /// (preenchidos ao buscar do SAP) e são persistidos para uso no applyDraft().
   Future<String> saveDraft({
     required String? masterListId,
     required List<MaterialPreco> materiais,
     required List<String> targets,
     required List<RegraAjuste> regras,
-    String? modo, // 'lista' ou 'grupo'
-    String? kdgrp, // código do grupo SAP (apenas no modo grupo)
+    String? modo,
+    String? kdgrp,
+    String? vigenciaDatab,
+    String? vigenciaDatbi,
+    String? justificativa,
+    String sapStatus = '',
   }) async {
-    // Pega o email do usuário logado via Supabase Auth (vem do Azure AD)
     final userEmail = supabase.auth.currentUser?.email ?? 'desconhecido';
 
     final draft = await supabase
@@ -201,6 +212,8 @@ class PriceService {
           'master_list_id': masterListId,
           'status': 'pending',
           'created_by_email': userEmail,
+          if (justificativa != null && justificativa.isNotEmpty)
+            'justificativa': justificativa,
         })
         .select()
         .single();
@@ -211,23 +224,27 @@ class PriceService {
     }
 
     final itens = materiais
-        .where(
-          (m) => m.novoPreco > 0 && m.novoPreco != m.precoAtual && !m.removido,
-        )
+        .where((m) => !m.removido)
         .map(
           (m) => {
             'draft_id': draftId,
             'product_id': m.codigo.trim(),
             'old_price': m.precoAtual,
-            'new_price': m.novoPreco,
+            'new_price': m.novoPreco > 0 ? m.novoPreco : m.precoAtual,
             'margin_pct': m.margemReal,
-            'datab': m.datab,
-            'datbi': m.datbi,
+            'datab': vigenciaDatab ?? m.datab,
+            'datbi': vigenciaDatbi ?? m.datbi,
             'kdgrp': kdgrp,
             'modo': modo,
             'origem_material': m.origemMaterial == OrigemMaterial.manual
                 ? 'manual'
                 : 'sap',
+            // ── Campos SAP necessários para o push de volta ao SAP ──
+            'konwa': m.konwa,
+            'kmein': m.kmein,
+            'krech': m.krech,
+            'mxwrt': m.mxwrt,
+            'sap_status': sapStatus,
           },
         )
         .toList();
@@ -274,9 +291,11 @@ class PriceService {
     return draftId;
   }
 
+  /// Aprova o draft: aplica os preços no Supabase E envia ao SAP.
+  /// Este é o método correto a chamar ao clicar em "Aprovar e publicar".
   Future<void> approveDraft(String draftId) async {
     await draftPricing.applyDraft(draftId);
-    await sapSync.pushToSap(draftId: draftId);
+    // await sapSync.pushToSap(draftId: draftId);
   }
 
   String _mapNivel(String n) {

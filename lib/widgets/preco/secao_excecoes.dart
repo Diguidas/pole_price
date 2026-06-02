@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:pole_price/controllers/preco_controller.dart';
+import 'package:pole_price/models/material_preco.dart';
 import 'package:pole_price/models/pricing_cluster_item.dart';
 import 'package:pole_price/models/regra_ajuste.dart';
 
@@ -18,7 +19,7 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
   String _tipo = 'Percentual';
   String? _listaExcecaoSelecionada;
   PricingClusterItem? _clusterSelecionado;
-  String? _materialSelecionado;
+  MaterialPreco? _materialSelecionado;
   final _valorController = TextEditingController();
 
   PrecoController get c => widget.controller;
@@ -33,9 +34,7 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
     if (_listaExcecaoSelecionada == null) return false;
     if (_valorController.text.isEmpty) return false;
     if (_nivel == 'Grupo' && _clusterSelecionado == null) return false;
-    if (_nivel == 'Material' && (_clusterSelecionado == null || _materialSelecionado == null)) {
-      return false;
-    }
+    if (_nivel == 'Material' && _materialSelecionado == null) return false;
     return true;
   }
 
@@ -43,6 +42,57 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
     if (id == null) return '';
     return c.clusters.where((cl) => cl.id == id).map((cl) => cl.name).firstOrNull ?? id;
   }
+
+  // ── Abre dialog de busca de cluster ──────────────────────────────────────
+
+  Future<void> _abrirPickerCluster() async {
+    if (c.clusters.isEmpty) await c.carregarClusters();
+    if (!mounted) return;
+
+    // Apenas clusters que têm ao menos um material na sessão atual
+    final clusterIdsDaSessao = c.materiais
+        .where((m) => !m.removido && m.clusterId != null)
+        .map((m) => m.clusterId!)
+        .toSet();
+    final clustersFiltrados = c.clusters
+        .where((cl) => clusterIdsDaSessao.contains(cl.id))
+        .toList();
+
+    final result = await showDialog<PricingClusterItem>(
+      context: context,
+      builder: (_) => _ClusterPickerDialog(clusters: clustersFiltrados),
+    );
+
+    if (result != null) {
+      setState(() {
+        _clusterSelecionado = result;
+        _materialSelecionado = null;
+        c.materiaisDoCluster = [];
+      });
+      if (_nivel == 'Material') {
+        await c.carregarMateriaisDoCluster(result.id);
+        setState(() {});
+      }
+    }
+  }
+
+  // ── Abre dialog de busca de material ─────────────────────────────────────
+
+  Future<void> _abrirPickerMaterial() async {
+    final materiais = c.materiais.where((m) => !m.removido).toList();
+    if (!mounted) return;
+
+    final result = await showDialog<MaterialPreco>(
+      context: context,
+      builder: (_) => _MaterialPickerDialog(materiais: materiais),
+    );
+
+    if (result != null) {
+      setState(() => _materialSelecionado = result);
+    }
+  }
+
+  // ── Build principal ───────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -83,10 +133,11 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
               border: Colors.grey.shade200,
             )
           else ...[
+            // ── Seleção de lista ────────────────────────────────────
             DropdownButtonFormField<String>(
               value: _listaExcecaoSelecionada,
               isExpanded: true,
-              decoration: _inputDeco('Selecione a lista para configurar exceções'),
+              decoration: _inputDeco('Lista para configurar exceções'),
               items: listasParaExcecao
                   .map((l) => DropdownMenuItem(value: l.id, child: Text(l.description)))
                   .toList(),
@@ -94,6 +145,7 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
             ),
             const SizedBox(height: 14),
 
+            // ── Cards de nível ──────────────────────────────────────
             const Text(
               'Nível da exceção',
               style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.black87),
@@ -105,7 +157,7 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
                   child: _cardNivel(
                     id: 'Tabela',
                     label: 'Tabela inteira',
-                    sub: 'Aplicar para todos os materiais',
+                    sub: 'Todos os materiais',
                     icon: Icons.table_rows_outlined,
                   ),
                 ),
@@ -114,7 +166,7 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
                   child: _cardNivel(
                     id: 'Grupo',
                     label: 'Grupo de material',
-                    sub: 'Aplicar para um grupo específico',
+                    sub: 'Um grupo específico',
                     icon: Icons.account_tree_outlined,
                   ),
                 ),
@@ -123,7 +175,7 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
                   child: _cardNivel(
                     id: 'Material',
                     label: 'Material específico',
-                    sub: 'Aplicar para materiais específicos',
+                    sub: 'Um material do grupo',
                     icon: Icons.inventory_2_outlined,
                   ),
                 ),
@@ -131,47 +183,40 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
             ),
             const SizedBox(height: 12),
 
-            if (_nivel == 'Grupo' || _nivel == 'Material') ...[
-              c.loadingClusters
-                  ? const LinearProgressIndicator()
-                  : DropdownButtonFormField<PricingClusterItem>(
-                      value: _clusterSelecionado,
-                      isExpanded: true,
-                      decoration: _inputDeco('Agrupamento'),
-                      items: c.clusters
-                          .map((cl) => DropdownMenuItem(value: cl, child: Text(cl.name)))
-                          .toList(),
-                      onChanged: (v) {
-                        setState(() {
-                          _clusterSelecionado = v;
-                          _materialSelecionado = null;
-                        });
-                        if (_nivel == 'Material' && v != null) {
-                          c.carregarMateriaisDoCluster(v.id);
-                        }
-                      },
-                    ),
+            // ── Picker de cluster (só nível Grupo) ──────────────────
+            if (_nivel == 'Grupo') ...[
+              _PickerField(
+                label: 'Agrupamento',
+                icon: Icons.account_tree_outlined,
+                loading: c.loadingClusters,
+                codigo: null,
+                nome: _clusterSelecionado?.name,
+                placeholder: 'Selecionar agrupamento...',
+                onTap: _abrirPickerCluster,
+                onClear: () => setState(() {
+                  _clusterSelecionado = null;
+                  c.materiaisDoCluster = [];
+                }),
+              ),
               const SizedBox(height: 8),
             ],
 
-            if (_nivel == 'Material' && _clusterSelecionado != null) ...[
-              c.loadingMateriaisCluster
-                  ? const LinearProgressIndicator()
-                  : DropdownButtonFormField<String>(
-                      value: _materialSelecionado,
-                      isExpanded: true,
-                      decoration: _inputDeco('Material'),
-                      items: c.materiaisDoCluster
-                          .map((m) => DropdownMenuItem(
-                                value: m.codigo,
-                                child: Text(m.description, overflow: TextOverflow.ellipsis),
-                              ))
-                          .toList(),
-                      onChanged: (v) => setState(() => _materialSelecionado = v),
-                    ),
+            // ── Picker de material (nível Material — direto da sessão) ─
+            if (_nivel == 'Material') ...[
+              _PickerField(
+                label: 'Material',
+                icon: Icons.inventory_2_outlined,
+                loading: false,
+                codigo: _materialSelecionado?.codigo,
+                nome: _materialSelecionado?.description,
+                placeholder: 'Selecionar material...',
+                onTap: _abrirPickerMaterial,
+                onClear: () => setState(() => _materialSelecionado = null),
+              ),
               const SizedBox(height: 8),
             ],
 
+            // ── Tipo + Valor ────────────────────────────────────────
             Row(
               children: [
                 Expanded(
@@ -205,6 +250,7 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
 
             const SizedBox(height: 12),
 
+            // ── Botão adicionar ─────────────────────────────────────
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
@@ -223,15 +269,10 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
                           nivel: _nivel,
                           tipo: _tipo,
                           valor: valor,
-                          clusterId: _clusterSelecionado?.id,
-                          clusterNome: _clusterSelecionado?.name,
-                          materialId: _nivel == 'Material' ? _materialSelecionado : null,
-                          materialNome: _nivel == 'Material'
-                              ? c.materiaisDoCluster
-                                  .where((m) => m.codigo == _materialSelecionado)
-                                  .map((m) => m.description)
-                                  .firstOrNull
-                              : null,
+                          clusterId: _nivel == 'Grupo' ? _clusterSelecionado?.id : null,
+                          clusterNome: _nivel == 'Grupo' ? _clusterSelecionado?.name : null,
+                          materialId: _nivel == 'Material' ? _materialSelecionado?.codigo : null,
+                          materialNome: _nivel == 'Material' ? _materialSelecionado?.description : null,
                         ));
                         setState(() {
                           _valorController.clear();
@@ -239,6 +280,7 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
                           _clusterSelecionado = null;
                           _materialSelecionado = null;
                           _nivel = 'Tabela';
+                          c.materiaisDoCluster = [];
                         });
                       }
                     : null,
@@ -246,6 +288,7 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
             ),
           ],
 
+          // ── Tabela de regras ──────────────────────────────────────
           if (c.regras.isNotEmpty) ...[
             const SizedBox(height: 16),
             const Divider(),
@@ -261,6 +304,8 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
       ),
     );
   }
+
+  // ── Tabela de regras ──────────────────────────────────────────────────────
 
   Widget _tabelaRegras() {
     return Container(
@@ -278,8 +323,9 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
             ),
             child: Row(
               children: [
+                _th('Lista', flex: 3),
                 _th('Nível', flex: 2),
-                _th('Descrição', flex: 3),
+                _th('Descrição', flex: 4),
                 _thRight('Ajuste', width: 60),
                 const SizedBox(width: 40),
               ],
@@ -292,12 +338,8 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
             final nomeLista = c.listas
                     .where((l) => l.id == r.targetListId)
                     .map((l) => l.description)
-                    .firstOrNull ?? r.targetListId;
-            final descricao = r.nivel == 'Grupo'
-                ? _nomeCluster(r.clusterId)
-                : r.nivel == 'Material'
-                ? r.materialId ?? ''
-                : nomeLista;
+                    .firstOrNull ??
+                r.targetListId;
             final sinal = r.valor >= 0 ? '+' : '';
             final ajusteStr =
                 '$sinal${r.valor.toStringAsFixed(2)}${r.tipo == 'Percentual' ? '%' : ' R\$'}';
@@ -309,11 +351,44 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   child: Row(
                     children: [
-                      Expanded(flex: 2, child: Text(r.nivel, style: const TextStyle(fontSize: 12))),
                       Expanded(
                         flex: 3,
-                        child: Text(descricao,
-                            style: const TextStyle(fontSize: 12), overflow: TextOverflow.ellipsis),
+                        child: Text(nomeLista,
+                            style: const TextStyle(fontSize: 12),
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                      Expanded(
+                          flex: 2,
+                          child: Text(r.nivel, style: const TextStyle(fontSize: 12))),
+                      Expanded(
+                        flex: 4,
+                        child: r.nivel == 'Material'
+                            ? Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (r.materialId != null)
+                                    Text(
+                                      r.materialId!,
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        fontFamily: 'monospace',
+                                        color: Color(0xFF9E9E9E),
+                                      ),
+                                    ),
+                                  Text(
+                                    r.materialNome ?? r.materialId ?? '',
+                                    style: const TextStyle(fontSize: 12),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              )
+                            : Text(
+                                r.nivel == 'Grupo'
+                                    ? _nomeCluster(r.clusterId)
+                                    : 'Toda a tabela',
+                                style: const TextStyle(fontSize: 12),
+                                overflow: TextOverflow.ellipsis,
+                              ),
                       ),
                       SizedBox(
                         width: 60,
@@ -345,6 +420,8 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
     );
   }
 
+  // ── Widgets auxiliares ────────────────────────────────────────────────────
+
   Widget _cardNivel({
     required String id,
     required String label,
@@ -360,7 +437,7 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
           _materialSelecionado = null;
           c.materiaisDoCluster = [];
         });
-        if (id == 'Grupo' || id == 'Material') c.carregarClusters();
+        if (id == 'Grupo') c.carregarClusters();
       },
       child: Container(
         padding: const EdgeInsets.all(10),
@@ -397,13 +474,14 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
     final nomeLista = c.listas
             .where((l) => l.id == _listaExcecaoSelecionada)
             .map((l) => l.description)
-            .firstOrNull ?? _listaExcecaoSelecionada!;
+            .firstOrNull ??
+        _listaExcecaoSelecionada!;
     final sufixo = _tipo == 'Percentual' ? '%' : ' R\$';
     final nivelDesc = _nivel == 'Grupo'
         ? 'no grupo ${_nomeCluster(_clusterSelecionado?.id)}'
         : _nivel == 'Material'
-        ? 'no material ${_materialSelecionado ?? ''}'
-        : 'em toda a tabela';
+            ? 'no material ${_materialSelecionado?.codigo ?? ''} — ${_materialSelecionado?.description ?? ''}'
+            : 'em toda a tabela';
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -427,20 +505,15 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
     );
   }
 
-  Widget _aviso(
-    String msg, {
-    required IconData icon,
-    required Color cor,
-    required Color bg,
-    required Color border,
-  }) {
+  Widget _aviso(String msg,
+      {required IconData icon,
+      required Color cor,
+      required Color bg,
+      required Color border}) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: border),
-      ),
+          color: bg, borderRadius: BorderRadius.circular(8), border: Border.all(color: border)),
       child: Row(
         children: [
           Icon(icon, size: 16, color: cor),
@@ -467,36 +540,486 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
     );
   }
 
-  Widget _th(String label, {int flex = 1}) {
-    return Expanded(
-      flex: flex,
-      child: Text(
-        label,
-        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade600),
+  Widget _th(String label, {int flex = 1}) => Expanded(
+        flex: flex,
+        child: Text(label,
+            style: TextStyle(
+                fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade600)),
+      );
+
+  Widget _thRight(String label, {required double width}) => SizedBox(
+        width: width,
+        child: Text(label,
+            textAlign: TextAlign.right,
+            style: TextStyle(
+                fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade600)),
+      );
+
+  Widget _numeroBadge(String n) => Container(
+        width: 24,
+        height: 24,
+        decoration: BoxDecoration(color: _laranja, borderRadius: BorderRadius.circular(6)),
+        child: Center(
+          child: Text(n,
+              style: const TextStyle(
+                  color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+        ),
+      );
+}
+
+// ── Widget de campo picker (botão que abre dialog) ────────────────────────────
+
+class _PickerField extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool loading;
+  final String? codigo;
+  final String? nome;
+  final String placeholder;
+  final bool enabled;
+  final VoidCallback onTap;
+  final VoidCallback onClear;
+
+  const _PickerField({
+    required this.label,
+    required this.icon,
+    required this.loading,
+    required this.codigo,
+    required this.nome,
+    required this.placeholder,
+    required this.onTap,
+    required this.onClear,
+    this.enabled = true,
+  });
+
+  bool get _temValor => nome != null;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: const TextStyle(
+                fontSize: 12, fontWeight: FontWeight.w600, color: Colors.black87)),
+        const SizedBox(height: 6),
+        InkWell(
+          onTap: enabled && !loading ? onTap : null,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+            decoration: BoxDecoration(
+              color: enabled ? Colors.white : Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: _temValor ? _laranja.withOpacity(0.4) : Colors.grey.shade300,
+              ),
+            ),
+            child: loading
+                ? const SizedBox(
+                    height: 20,
+                    child: LinearProgressIndicator(color: _laranja),
+                  )
+                : Row(
+                    children: [
+                      Icon(
+                        _temValor ? icon : Icons.search,
+                        size: 16,
+                        color: _temValor ? _laranja : Colors.grey.shade400,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _temValor
+                            ? Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (codigo != null)
+                                    Text(
+                                      codigo!,
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        fontFamily: 'monospace',
+                                        color: Color(0xFF9E9E9E),
+                                      ),
+                                    ),
+                                  Text(
+                                    nome!,
+                                    style: const TextStyle(
+                                        fontSize: 13, color: Color(0xFF212121)),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              )
+                            : Text(
+                                placeholder,
+                                style: TextStyle(
+                                    fontSize: 13, color: Colors.grey.shade400),
+                              ),
+                      ),
+                      if (_temValor)
+                        GestureDetector(
+                          onTap: onClear,
+                          child: Icon(Icons.close, size: 16, color: Colors.grey.shade400),
+                        )
+                      else
+                        Icon(Icons.chevron_right, size: 18, color: Colors.grey.shade400),
+                    ],
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Dialog de busca de cluster ────────────────────────────────────────────────
+
+class _ClusterPickerDialog extends StatefulWidget {
+  final List<PricingClusterItem> clusters;
+  const _ClusterPickerDialog({required this.clusters});
+
+  @override
+  State<_ClusterPickerDialog> createState() => _ClusterPickerDialogState();
+}
+
+class _ClusterPickerDialogState extends State<_ClusterPickerDialog> {
+  String _pesquisa = '';
+
+  List<PricingClusterItem> get _filtrados => widget.clusters
+      .where((cl) => cl.name.toLowerCase().contains(_pesquisa.toLowerCase()) ||
+          cl.id.toLowerCase().contains(_pesquisa.toLowerCase()))
+      .toList();
+
+  @override
+  Widget build(BuildContext context) {
+    final filtrados = _filtrados;
+    return Dialog(
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: SizedBox(
+        width: 460,
+        height: 500,
+        child: Column(
+          children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.fromLTRB(24, 20, 16, 20),
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: Color(0xFFF0F0F0))),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: _laranja.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.account_tree_outlined, color: _laranja, size: 18),
+                  ),
+                  const SizedBox(width: 12),
+                  const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Selecionar agrupamento',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                      Text('Grupos de materiais disponíveis',
+                          style: TextStyle(fontSize: 11, color: Color(0xFF9E9E9E))),
+                    ],
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18, color: Color(0xFF9E9E9E)),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+
+            // Busca
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+              child: TextField(
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: 'Buscar agrupamento...',
+                  hintStyle: const TextStyle(fontSize: 13, color: Color(0xFFBDBDBD)),
+                  prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF9E9E9E)),
+                  filled: true,
+                  fillColor: const Color(0xFFF8F8F8),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Color(0xFFE8E8E8)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Color(0xFFE8E8E8)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: _laranja, width: 1.5),
+                  ),
+                ),
+                onChanged: (v) => setState(() => _pesquisa = v),
+              ),
+            ),
+
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '${filtrados.length} agrupamento${filtrados.length != 1 ? 's' : ''}',
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF9E9E9E)),
+                ),
+              ),
+            ),
+            const Divider(height: 1, color: Color(0xFFF0F0F0)),
+
+            // Lista
+            Expanded(
+              child: filtrados.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.search_off, size: 32, color: Colors.grey.shade300),
+                          const SizedBox(height: 8),
+                          Text('Nenhum agrupamento encontrado',
+                              style: TextStyle(fontSize: 13, color: Colors.grey.shade400)),
+                        ],
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      itemCount: filtrados.length,
+                      itemBuilder: (_, i) {
+                        final cl = filtrados[i];
+                        return InkWell(
+                          onTap: () => Navigator.pop(context, cl),
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(vertical: 2),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 32,
+                                  height: 32,
+                                  decoration: BoxDecoration(
+                                    color: _laranja.withOpacity(0.08),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: const Icon(Icons.account_tree_outlined,
+                                      size: 16, color: _laranja),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(cl.name,
+                                          style: const TextStyle(
+                                              fontSize: 13, fontWeight: FontWeight.w500)),
+                                      Text('ID: ${cl.id}',
+                                          style: const TextStyle(
+                                              fontSize: 10, color: Color(0xFF9E9E9E))),
+                                    ],
+                                  ),
+                                ),
+                                const Icon(Icons.chevron_right,
+                                    size: 16, color: Color(0xFFCCCCCC)),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }
+}
 
-  Widget _thRight(String label, {required double width}) {
-    return SizedBox(
-      width: width,
-      child: Text(
-        label,
-        textAlign: TextAlign.right,
-        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade600),
-      ),
-    );
-  }
+// ── Dialog de busca de material ───────────────────────────────────────────────
 
-  Widget _numeroBadge(String n) {
-    return Container(
-      width: 24,
-      height: 24,
-      decoration: BoxDecoration(color: _laranja, borderRadius: BorderRadius.circular(6)),
-      child: Center(
-        child: Text(
-          n,
-          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+class _MaterialPickerDialog extends StatefulWidget {
+  final List<MaterialPreco> materiais;
+  const _MaterialPickerDialog({required this.materiais});
+
+  @override
+  State<_MaterialPickerDialog> createState() => _MaterialPickerDialogState();
+}
+
+class _MaterialPickerDialogState extends State<_MaterialPickerDialog> {
+  String _pesquisa = '';
+
+  List<MaterialPreco> get _filtrados => widget.materiais
+      .where((m) =>
+          m.codigo.toLowerCase().contains(_pesquisa.toLowerCase()) ||
+          m.description.toLowerCase().contains(_pesquisa.toLowerCase()))
+      .toList();
+
+  @override
+  Widget build(BuildContext context) {
+    final filtrados = _filtrados;
+    return Dialog(
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: SizedBox(
+        width: 460,
+        height: 500,
+        child: Column(
+          children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.fromLTRB(24, 20, 16, 20),
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: Color(0xFFF0F0F0))),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: _laranja.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.inventory_2_outlined, color: _laranja, size: 18),
+                  ),
+                  const SizedBox(width: 12),
+                  const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Selecionar material',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                      Text('Materiais do agrupamento selecionado',
+                          style: TextStyle(fontSize: 11, color: Color(0xFF9E9E9E))),
+                    ],
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18, color: Color(0xFF9E9E9E)),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+
+            // Busca
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+              child: TextField(
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: 'Buscar por código ou descrição...',
+                  hintStyle: const TextStyle(fontSize: 13, color: Color(0xFFBDBDBD)),
+                  prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF9E9E9E)),
+                  filled: true,
+                  fillColor: const Color(0xFFF8F8F8),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Color(0xFFE8E8E8)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Color(0xFFE8E8E8)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: _laranja, width: 1.5),
+                  ),
+                ),
+                onChanged: (v) => setState(() => _pesquisa = v),
+              ),
+            ),
+
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '${filtrados.length} material${filtrados.length != 1 ? 'is' : ''}',
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF9E9E9E)),
+                ),
+              ),
+            ),
+            const Divider(height: 1, color: Color(0xFFF0F0F0)),
+
+            // Lista
+            Expanded(
+              child: filtrados.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.search_off, size: 32, color: Colors.grey.shade300),
+                          const SizedBox(height: 8),
+                          Text('Nenhum material encontrado',
+                              style: TextStyle(fontSize: 13, color: Colors.grey.shade400)),
+                        ],
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      itemCount: filtrados.length,
+                      itemBuilder: (_, i) {
+                        final m = filtrados[i];
+                        return InkWell(
+                          onTap: () => Navigator.pop(context, m),
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(vertical: 2),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF0F0F0),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    m.codigo,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontFamily: 'monospace',
+                                      color: Color(0xFF616161),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    m.description,
+                                    style: const TextStyle(fontSize: 13),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                const Icon(Icons.chevron_right,
+                                    size: 16, color: Color(0xFFCCCCCC)),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
         ),
       ),
     );

@@ -65,8 +65,8 @@ class _ConfigScreenState extends State<ConfigScreen> {
       final supabase = Supabase.instance.client;
       final listas = await supabase
           .from('price_lists')
-          .select('id, description')
-          .order('description');
+          .select('pltyp, ptext')
+          .order('ptext');
       final grupos = await supabase
           .from('pricing_clusters')
           .select('id, name')
@@ -760,8 +760,8 @@ class _DialogUsuarioState extends State<_DialogUsuario> {
                           shrinkWrap: true,
                           padding: const EdgeInsets.symmetric(vertical: 4),
                           children: widget.todasListas.map((l) {
-                            final id = l['id'].toString();
-                            final nome = l['description']?.toString() ?? id;
+                            final id = l['pltyp'].toString();
+                            final nome = l['ptext']?.toString() ?? id;
                             final marq = _listsSelecionadas.contains(id);
                             return CheckboxListTile(
                               dense: true,

@@ -10,6 +10,13 @@ class MaterialDraftPreview {
   final String origem;
   final bool foiEditado;
 
+  // Campos SAP necessários para o push (gravados em price_draft_items)
+  final String? konwa;
+  final String? kmein;
+  final String? krech;
+  final double? mxwrt;
+  final String sapStatus;
+
   MaterialDraftPreview({
     required this.materialRowId,
     required this.productId,
@@ -21,6 +28,11 @@ class MaterialDraftPreview {
     required this.precoNovo,
     required this.origem,
     required this.foiEditado,
+    this.konwa,
+    this.kmein,
+    this.krech,
+    this.mxwrt,
+    this.sapStatus = '',
   });
 
   Map<String, dynamic> toRowMap() => {
@@ -34,6 +46,11 @@ class MaterialDraftPreview {
         'preco_novo': precoNovo,
         'origem': origem,
         'foi_editado': foiEditado,
+        if (konwa != null) 'konwa': konwa,
+        if (kmein != null) 'kmein': kmein,
+        if (krech != null) 'krech': krech,
+        if (mxwrt != null) 'mxwrt': mxwrt,
+        'sap_status': sapStatus,
       };
 }
 

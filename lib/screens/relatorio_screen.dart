@@ -119,6 +119,7 @@ class _MaterialAgrupado {
   }
 }
 
+enum _ModoRelatorio { lista, historico }
 // ─────────────────────────────────────────────────────────────────────────────
 // Tela Principal
 // ─────────────────────────────────────────────────────────────────────────────
@@ -137,6 +138,8 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
   static const _slate200 = Color(0xFFE2E8F0);
   static const _slate100 = Color(0xFFF1F5F9);
   static const _bgSuave = Color(0xFFF8FAFC);
+  static const _azul = Color(0xFF0EA5E9);
+  static const _verde = Color(0xFF10B981);
 
   final _supabase = Supabase.instance.client;
 
@@ -158,7 +161,26 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
   _MaterialAgrupado? _materialAtivo;
 
   // ── Histórico ─────────────────────────────────────────────────────────────
+  // ── Modo da tela ──────────────────────────────────────────────────────────
+
+  _ModoRelatorio _modoRelatorio = _ModoRelatorio.lista;
+
+  // ── Estado do modo Histórico SAP ──────────────────────────────────────────
+  final _codigosController = TextEditingController();
+  List<String> get _codigosDigitados => _codigosController.text
+      .split(RegExp(r'[,\n]+'))
+      .map((s) => s.trim())
+      .where((s) => s.isNotEmpty)
+      .toList();
+
+  bool _loadingHistoricoSap = false;
+  List<_MaterialHistorico> _historicoMateriais = [];
+  _MaterialHistorico? _materialHistoricoAtivo;
+  _EntradaHistoricoSap? _entradaHistoricoAtiva;
+
+  // ── Histórico (modo lista — inalterado) ───────────────────────────────────
   bool _loadingHistorico = false;
+
   List<_PontoHistorico> _historico = [];
   List<_EntradaVigencia> _vigencias = [];
 
@@ -172,6 +194,37 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
               (m.descricao ?? '').toLowerCase().contains(b),
         )
         .toList();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Força rebuild ao digitar para habilitar o botão
+    _codigosController.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _codigosController.dispose();
+    super.dispose();
+  }
+
+  bool get _podeBuscarAtual {
+    if (_modoRelatorio == _ModoRelatorio.historico)
+      return _codigosDigitados.isNotEmpty;
+    return _podeBuscar;
+  }
+
+  bool get _isLoadingAtual => _modoRelatorio == _ModoRelatorio.historico
+      ? _loadingHistoricoSap
+      : _loadingSap;
+
+  void _acaoBuscar() {
+    if (_modoRelatorio == _ModoRelatorio.historico) {
+      _buscarHistorico();
+    } else {
+      _consultarSap();
+    }
   }
 
   bool get _podeBuscar =>
@@ -269,6 +322,79 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
         _loadingSap = false;
       });
     }
+  }
+
+  Future<void> _buscarHistorico() async {
+    final codigos = _codigosDigitados;
+    if (codigos.isEmpty) return;
+
+    setState(() {
+      _loadingHistoricoSap = true;
+      _historicoMateriais = [];
+      _materialHistoricoAtivo = null;
+      _entradaHistoricoAtiva = null;
+      _erroSap = null;
+    });
+
+    try {
+      final sapSync = SapSyncService(_supabase);
+      final databStr = _datab != null ? _formatSapDate(_datab!) : null;
+      final datbiStr = _datbi != null ? _formatSapDate(_datbi!) : null;
+
+      final rawList = await sapSync.fetchHistoricoRaw(
+        matnrs: codigos,
+        datab: databStr,
+        datbi: datbiStr,
+        databOp: _datab != null ? _databOp : null,
+        datbiOp: _datbi != null ? _datbiOp : null,
+      );
+
+      final matnrsLimpos = codigos
+          .map((c) => c.trim().replaceAll(RegExp(r'^0+'), ''))
+          .toList();
+      final productsRes = await _supabase
+          .from('products')
+          .select('code, name')
+          .inFilter('code', matnrsLimpos);
+      final descMap = {
+        for (final p in productsRes as List)
+          p['code'].toString(): p['name'].toString(),
+      };
+
+      final materiais = rawList.map((json) {
+        final mat = _MaterialHistorico.fromJson(json);
+        if (descMap.containsKey(mat.matnr)) {
+          return _MaterialHistorico(
+            matnr: mat.matnr,
+            descricao: descMap[mat.matnr],
+            entradas: mat.entradas,
+          );
+        }
+        return mat;
+      }).toList();
+
+      if (!mounted) return;
+      setState(() {
+        _historicoMateriais = materiais;
+        _loadingHistoricoSap = false;
+      });
+      if (materiais.isNotEmpty) _selecionarMaterialHistorico(materiais.first);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _erroSap = 'Erro ao buscar histórico SAP: $e';
+        _loadingHistoricoSap = false;
+      });
+    }
+  }
+
+  void _selecionarMaterialHistorico(_MaterialHistorico mat) {
+    setState(() {
+      _materialHistoricoAtivo = mat;
+      _entradaHistoricoAtiva = mat.entradas.isNotEmpty
+          ? mat.entradas.first
+          : null;
+    });
   }
 
   void _selecionarMaterial(_MaterialAgrupado material) {
@@ -521,50 +647,108 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
           _modoChip(
             label: 'Lista',
             icon: Icons.list_alt_rounded,
-            ativo: _modo == SapModo.lista,
+            ativo:
+                _modoRelatorio == _ModoRelatorio.lista &&
+                _modo == SapModo.lista,
             onTap: () => setState(() {
+              _modoRelatorio = _ModoRelatorio.lista;
               _modo = SapModo.lista;
               _grupoSelecionado = null;
+              _historicoMateriais = [];
+              _materialHistoricoAtivo = null;
             }),
           ),
           const SizedBox(width: 8),
           _modoChip(
             label: 'Lista + Grupo',
             icon: Icons.account_tree_rounded,
-            ativo: _modo == SapModo.grupo,
-            onTap: () => setState(() => _modo = SapModo.grupo),
+            ativo:
+                _modoRelatorio == _ModoRelatorio.lista &&
+                _modo == SapModo.grupo,
+            onTap: () => setState(() {
+              _modoRelatorio = _ModoRelatorio.lista;
+              _modo = SapModo.grupo;
+              _historicoMateriais = [];
+              _materialHistoricoAtivo = null;
+            }),
+          ),
+          const SizedBox(width: 8),
+          _modoChip(
+            label: 'Histórico',
+            icon: Icons.history_rounded,
+            ativo: _modoRelatorio == _ModoRelatorio.historico,
+            onTap: () => setState(() {
+              _modoRelatorio = _ModoRelatorio.historico;
+              _materiais = [];
+              _materiaisAgrupados = [];
+              _materialAtivo = null;
+            }),
           ),
           const SizedBox(width: 16),
 
-          // Seletor de Lista — botão que abre o picker
-          _seletorBtn(
-            label: _listaSelecionada != null
-                ? '${_listaSelecionada!.pltyp} — ${_listaSelecionada!.ptext}'
-                : 'Selecionar lista…',
-            icon: Icons.list_alt_rounded,
-            preenchido: _listaSelecionada != null,
-            cor: _laranja,
-            onTap: _abrirListaPicker,
-            onClear: _listaSelecionada != null
-                ? () => setState(() => _listaSelecionada = null)
-                : null,
-          ),
-
-          if (_modo == SapModo.grupo) ...[
-            const SizedBox(width: 10),
-            // Seletor de Grupo — botão que abre o picker
+          if (_modoRelatorio == _ModoRelatorio.historico) ...[
+            Flexible(
+              flex: 4,
+              child: SizedBox(
+                height: 40,
+                child: TextField(
+                  controller: _codigosController,
+                  style: const TextStyle(fontSize: 13),
+                  decoration: InputDecoration(
+                    hintText: 'Código(s) do material — separe por vírgula',
+                    prefixIcon: const Icon(
+                      Icons.qr_code_rounded,
+                      size: 16,
+                      color: _slate600,
+                    ),
+                    isDense: true,
+                    filled: true,
+                    fillColor: _bgSuave,
+                    contentPadding: const EdgeInsets.symmetric(
+                      vertical: 10,
+                      horizontal: 12,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: _slate200),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: _laranja),
+                    ),
+                  ),
+                  onSubmitted: (_) => _buscarHistorico(),
+                ),
+              ),
+            ),
+          ] else ...[
             _seletorBtn(
-              label: _grupoSelecionado != null
-                  ? '${_grupoSelecionado!.kdgrp} — ${_grupoSelecionado!.ktext}'
-                  : 'Selecionar grupo…',
-              icon: Icons.account_tree_rounded,
-              preenchido: _grupoSelecionado != null,
-              cor: const Color(0xFF0EA5E9),
-              onTap: _abrirGrupoPicker,
-              onClear: _grupoSelecionado != null
-                  ? () => setState(() => _grupoSelecionado = null)
+              label: _listaSelecionada != null
+                  ? '${_listaSelecionada!.pltyp} — ${_listaSelecionada!.ptext}'
+                  : 'Selecionar lista…',
+              icon: Icons.list_alt_rounded,
+              preenchido: _listaSelecionada != null,
+              cor: _laranja,
+              onTap: _abrirListaPicker,
+              onClear: _listaSelecionada != null
+                  ? () => setState(() => _listaSelecionada = null)
                   : null,
             ),
+            if (_modo == SapModo.grupo) ...[
+              const SizedBox(width: 10),
+              _seletorBtn(
+                label: _grupoSelecionado != null
+                    ? '${_grupoSelecionado!.kdgrp} — ${_grupoSelecionado!.ktext}'
+                    : 'Selecionar grupo…',
+                icon: Icons.account_tree_rounded,
+                preenchido: _grupoSelecionado != null,
+                cor: const Color(0xFF0EA5E9),
+                onTap: _abrirGrupoPicker,
+                onClear: _grupoSelecionado != null
+                    ? () => setState(() => _grupoSelecionado = null)
+                    : null,
+              ),
+            ],
           ],
 
           const SizedBox(width: 16),
@@ -601,9 +785,12 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
           const SizedBox(width: 16),
 
           // Botão consultar
+          // Botão consultar
           FilledButton.icon(
-            onPressed: _podeBuscar && !_loadingSap ? _consultarSap : null,
-            icon: _loadingSap
+            onPressed: _podeBuscarAtual && !_isLoadingAtual
+                ? _acaoBuscar
+                : null,
+            icon: _isLoadingAtual
                 ? const SizedBox(
                     width: 15,
                     height: 15,
@@ -612,8 +799,19 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
                       color: Colors.white,
                     ),
                   )
-                : const Icon(Icons.bolt_rounded, size: 18),
-            label: Text(_loadingSap ? 'Consultando…' : 'Consultar SAP'),
+                : Icon(
+                    _modoRelatorio == _ModoRelatorio.historico
+                        ? Icons.history_rounded
+                        : Icons.bolt_rounded,
+                    size: 18,
+                  ),
+            label: Text(
+              _isLoadingAtual
+                  ? 'Buscando…'
+                  : (_modoRelatorio == _ModoRelatorio.historico
+                        ? 'Buscar Histórico'
+                        : 'Consultar SAP'),
+            ),
             style: FilledButton.styleFrom(
               backgroundColor: _laranja,
               padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
@@ -789,6 +987,92 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
   // ── Corpo ────────────────────────────────────────────────────────────────
 
   Widget _corpo() {
+    // ── Modo Histórico SAP ────────────────────────────────────────────────────
+    if (_modoRelatorio == _ModoRelatorio.historico) {
+      if (_loadingHistoricoSap) {
+        return const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: _laranja),
+              SizedBox(height: 16),
+              Text(
+                'Buscando histórico no SAP…',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: _slate600,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+      if (_erroSap != null) {
+        return Center(
+          child: Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF1F2),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFFECACA)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.error_outline_rounded,
+                  color: Color(0xFFB91C1C),
+                ),
+                const SizedBox(width: 12),
+                Flexible(
+                  child: Text(
+                    _erroSap!,
+                    style: const TextStyle(
+                      color: Color(0xFFB91C1C),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+      if (_historicoMateriais.isEmpty) {
+        return const _EstadoVazio(
+          icon: Icons.history_rounded,
+          titulo: 'Nenhum histórico encontrado',
+          subtitulo:
+              'Digite o código de um material e clique em Buscar Histórico.',
+        );
+      }
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 340,
+            child: _ColunaHistoricoSap(
+              materiais: _historicoMateriais,
+              materialAtivo: _materialHistoricoAtivo,
+              entradaAtiva: _entradaHistoricoAtiva,
+              onMaterialSelecionado: _selecionarMaterialHistorico,
+              onEntradaSelecionada: (entrada) =>
+                  setState(() => _entradaHistoricoAtiva = entrada),
+            ),
+          ),
+          const SizedBox(width: 20),
+          Expanded(
+            child: _PainelDetalheHistorico(
+              material: _materialHistoricoAtivo,
+              entrada: _entradaHistoricoAtiva,
+            ),
+          ),
+        ],
+      );
+    }
+
+    // ── Modo Lista / Lista+Grupo (inalterado) ─────────────────────────────────
     if (!_loadingSap && _materiais.isEmpty && _erroSap == null) {
       return _EstadoVazio(
         icon: Icons.bolt_outlined,
@@ -872,6 +1156,818 @@ class _RelatorioScreenState extends State<RelatorioScreen> {
         ),
       ],
     );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Modelos do modo Histórico SAP
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _EntradaHistoricoSap {
+  final String tipo;
+  final String pltyp;
+  final String kdgrp;
+  final String datab;
+  final String datbi;
+  final double kbetr;
+  final double? mxwrt;
+  final double? kgSug;
+  final double? kgMin;
+  final String? perc;
+
+  const _EntradaHistoricoSap({
+    required this.tipo,
+    required this.pltyp,
+    required this.kdgrp,
+    required this.datab,
+    required this.datbi,
+    required this.kbetr,
+    this.mxwrt,
+    this.kgSug,
+    this.kgMin,
+    this.perc,
+  });
+
+  factory _EntradaHistoricoSap.fromJson(Map<String, dynamic> json) {
+    return _EntradaHistoricoSap(
+      // Note que agora as chaves estão em MAIÚSCULAS para bater com o log do SAP
+      tipo: (json['TIPO'] ?? '').toString().toUpperCase(),
+      pltyp: (json['PLTYP'] ?? '').toString().trim(),
+      kdgrp: (json['KDGRP'] ?? '').toString().trim(),
+      datab: (json['DATAB'] ?? '').toString().trim(),
+      datbi: (json['DATBI'] ?? '').toString().trim(),
+      kbetr: double.tryParse(json['KBETR']?.toString() ?? '0') ?? 0,
+      mxwrt: double.tryParse(json['MXWRT']?.toString() ?? ''),
+      kgSug: double.tryParse(json['KG_SUG']?.toString() ?? ''),
+      kgMin: double.tryParse(json['KG_MIN']?.toString() ?? ''),
+      perc: json['PERC']?.toString(),
+    );
+  }
+
+  bool get isGrupo => tipo == 'GRUPO';
+  String get rotulo => isGrupo ? 'Lista $pltyp · Grupo $kdgrp' : 'Lista $pltyp';
+  String get chaveAgrupamento =>
+      isGrupo ? 'grupo:$pltyp:$kdgrp' : 'lista:$pltyp';
+}
+
+class _MaterialHistorico {
+  final String matnr;
+  final String? descricao;
+  final List<_EntradaHistoricoSap> entradas;
+
+  const _MaterialHistorico({
+    required this.matnr,
+    this.descricao,
+    required this.entradas,
+  });
+
+  factory _MaterialHistorico.fromJson(Map<String, dynamic> json) {
+    // SAP retorna chaves em MAIÚSCULAS
+    final rawList = (json['HISTORICO'] ?? json['historico']) as List? ?? [];
+    final matnr = (json['MATNR'] ?? json['matnr'] ?? '').toString().trim();
+    return _MaterialHistorico(
+      matnr: matnr.replaceAll(RegExp(r'^0+'), ''),
+      descricao: json['descricao']?.toString(),
+      entradas: rawList
+          .whereType<Map<String, dynamic>>()
+          .map(_EntradaHistoricoSap.fromJson)
+          .toList(),
+    );
+  }
+
+  Map<String, List<_EntradaHistoricoSap>> get porAgrupamento {
+    final map = <String, List<_EntradaHistoricoSap>>{};
+    for (final e in entradas) {
+      map.putIfAbsent(e.chaveAgrupamento, () => []).add(e);
+    }
+    for (final list in map.values) {
+      list.sort((a, b) => a.datab.compareTo(b.datab));
+    }
+    return map;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Widget: Coluna esquerda do modo Histórico SAP
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ColunaHistoricoSap extends StatefulWidget {
+  final List<_MaterialHistorico> materiais;
+  final _MaterialHistorico? materialAtivo;
+  final _EntradaHistoricoSap? entradaAtiva;
+  final ValueChanged<_MaterialHistorico> onMaterialSelecionado;
+  final ValueChanged<_EntradaHistoricoSap> onEntradaSelecionada;
+
+  const _ColunaHistoricoSap({
+    required this.materiais,
+    required this.materialAtivo,
+    required this.entradaAtiva,
+    required this.onMaterialSelecionado,
+    required this.onEntradaSelecionada,
+  });
+
+  @override
+  State<_ColunaHistoricoSap> createState() => _ColunaHistoricoSapState();
+}
+
+class _ColunaHistoricoSapState extends State<_ColunaHistoricoSap> {
+  static const _laranja = Color(0xFFFF6B00);
+  static const _azul = Color(0xFF0EA5E9);
+  static const _slate900 = Color(0xFF0F172A);
+  static const _slate600 = Color(0xFF475569);
+  static const _slate200 = Color(0xFFE2E8F0);
+  static const _slate100 = Color(0xFFF1F5F9);
+  static const _bgSuave = Color(0xFFF8FAFC);
+
+  // Quais seções de categoria estão expandidas
+  // chave = "matnr::listas" ou "matnr::grupos"
+  final Set<String> _expandidos = {};
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _slate200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
+            child: Row(
+              children: [
+                const Icon(Icons.history_rounded, size: 16, color: _laranja),
+                const SizedBox(width: 8),
+                Text(
+                  '${widget.materiais.length} material${widget.materiais.length == 1 ? '' : 'is'}',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: _slate900,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1, color: _slate100),
+          Expanded(
+            child: ListView.builder(
+              itemCount: widget.materiais.length,
+              itemBuilder: (context, idx) {
+                final mat = widget.materiais[idx];
+                final materialAtivo = widget.materialAtivo?.matnr == mat.matnr;
+
+                // Separa entradas em dois grupos: só-lista e lista+grupo
+                final entradasLista = mat.entradas
+                    .where((e) => !e.isGrupo)
+                    .toList();
+                final entradasGrupo = mat.entradas
+                    .where((e) => e.isGrupo)
+                    .toList();
+
+                // Agrupa por chaveAgrupamento dentro de cada categoria
+                Map<String, List<_EntradaHistoricoSap>> _agrupar(
+                  List<_EntradaHistoricoSap> lista,
+                ) {
+                  final map = <String, List<_EntradaHistoricoSap>>{};
+                  for (final e in lista) {
+                    map.putIfAbsent(e.chaveAgrupamento, () => []).add(e);
+                  }
+                  return map;
+                }
+
+                final porLista = _agrupar(entradasLista);
+                final porGrupo = _agrupar(entradasGrupo);
+
+                final chaveListas = '${mat.matnr}::listas';
+                final chaveGrupos = '${mat.matnr}::grupos';
+                final listasExpandido = _expandidos.contains(chaveListas);
+                final gruposExpandido = _expandidos.contains(chaveGrupos);
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ── Nível 1: Material ──────────────────────────────────
+                    InkWell(
+                      onTap: () {
+                        widget.onMaterialSelecionado(mat);
+                        setState(() {
+                          _expandidos.removeWhere(
+                            (k) => k.startsWith('${mat.matnr}::'),
+                          );
+                        });
+                      },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 130),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        color: materialAtivo
+                            ? _laranja.withOpacity(0.04)
+                            : Colors.transparent,
+                        child: Row(
+                          children: [
+                            AnimatedContainer(
+                              duration: const Duration(milliseconds: 130),
+                              width: 3,
+                              height: 40,
+                              margin: const EdgeInsets.only(right: 12),
+                              decoration: BoxDecoration(
+                                color: materialAtivo
+                                    ? _laranja
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                            ),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    mat.descricao ?? mat.matnr,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: materialAtivo
+                                          ? FontWeight.w700
+                                          : FontWeight.w500,
+                                      color: _slate900,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Row(
+                                    children: [
+                                      Text(
+                                        mat.matnr,
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          fontFamily: 'monospace',
+                                          color: _slate600,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      if (porLista.isNotEmpty) ...[
+                                        const SizedBox(width: 6),
+                                        _BadgeCategoria(
+                                          label:
+                                              '${porLista.length} lista${porLista.length == 1 ? '' : 's'}',
+                                          cor: _laranja,
+                                        ),
+                                      ],
+                                      if (porGrupo.isNotEmpty) ...[
+                                        const SizedBox(width: 4),
+                                        _BadgeCategoria(
+                                          label:
+                                              '${porGrupo.length} grupo${porGrupo.length == 1 ? '' : 's'}',
+                                          cor: _azul,
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Icon(
+                              materialAtivo
+                                  ? Icons.keyboard_arrow_down_rounded
+                                  : Icons.keyboard_arrow_right_rounded,
+                              size: 18,
+                              color: materialAtivo ? _laranja : _slate600,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    // ── Nível 2 e 3 — só quando material ativo ────────────
+                    if (materialAtivo) ...[
+                      // ── Categoria: Listas ──────────────────────────────
+                      if (porLista.isNotEmpty)
+                        _SecaoCategoria(
+                          titulo: 'Listas',
+                          icone: Icons.list_alt_rounded,
+                          cor: _laranja,
+                          quantidade: porLista.length,
+                          expandido: listasExpandido,
+                          onToggle: () => setState(() {
+                            listasExpandido
+                                ? _expandidos.remove(chaveListas)
+                                : _expandidos.add(chaveListas);
+                          }),
+                          // Nível 3: cada lista dentro da categoria
+                          filhos: listasExpandido
+                              ? porLista.entries.map((entry) {
+                                  final primeira = entry.value.first;
+                                  final selecionada =
+                                      widget.entradaAtiva != null &&
+                                      entry.value.contains(widget.entradaAtiva);
+                                  return _ItemAgrupamento(
+                                    rotulo: primeira.rotulo,
+                                    qtdPeriodos: entry.value.length,
+                                    cor: _laranja,
+                                    selecionado: selecionada,
+                                    onTap: () => widget.onEntradaSelecionada(
+                                      entry.value.last,
+                                    ),
+                                  );
+                                }).toList()
+                              : [],
+                        ),
+
+                      // ── Categoria: Listas + Grupo ──────────────────────
+                      if (porGrupo.isNotEmpty)
+                        _SecaoCategoria(
+                          titulo: 'Listas + Grupo',
+                          icone: Icons.account_tree_rounded,
+                          cor: _azul,
+                          quantidade: porGrupo.length,
+                          expandido: gruposExpandido,
+                          onToggle: () => setState(() {
+                            gruposExpandido
+                                ? _expandidos.remove(chaveGrupos)
+                                : _expandidos.add(chaveGrupos);
+                          }),
+                          filhos: gruposExpandido
+                              ? porGrupo.entries.map((entry) {
+                                  final primeira = entry.value.first;
+                                  final selecionada =
+                                      widget.entradaAtiva != null &&
+                                      entry.value.contains(widget.entradaAtiva);
+                                  return _ItemAgrupamento(
+                                    rotulo: primeira.rotulo,
+                                    qtdPeriodos: entry.value.length,
+                                    cor: _azul,
+                                    selecionado: selecionada,
+                                    onTap: () => widget.onEntradaSelecionada(
+                                      entry.value.last,
+                                    ),
+                                  );
+                                }).toList()
+                              : [],
+                        ),
+                    ],
+
+                    if (idx < widget.materiais.length - 1)
+                      const Divider(height: 1, color: _slate100),
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Nível 2 — Seção de categoria (Listas / Listas + Grupo)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SecaoCategoria extends StatelessWidget {
+  final String titulo;
+  final IconData icone;
+  final Color cor;
+  final int quantidade;
+  final bool expandido;
+  final VoidCallback onToggle;
+  final List<Widget> filhos;
+
+  static const _slate100 = Color(0xFFF1F5F9);
+
+  const _SecaoCategoria({
+    required this.titulo,
+    required this.icone,
+    required this.cor,
+    required this.quantidade,
+    required this.expandido,
+    required this.onToggle,
+    required this.filhos,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        InkWell(
+          onTap: onToggle,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(28, 9, 16, 9),
+            color: expandido ? cor.withOpacity(0.03) : Colors.transparent,
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(5),
+                  decoration: BoxDecoration(
+                    color: cor.withOpacity(0.10),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Icon(icone, size: 12, color: cor),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    titulo,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: cor,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: cor.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    '$quantidade',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      color: cor,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                AnimatedRotation(
+                  turns: expandido ? 0.5 : 0.0,
+                  duration: const Duration(milliseconds: 150),
+                  child: Icon(
+                    Icons.expand_more_rounded,
+                    size: 16,
+                    color: cor.withOpacity(0.7),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeInOut,
+          child: Column(children: filhos),
+        ),
+        const Divider(height: 1, color: _slate100),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Nível 3 — Item de agrupamento (Lista X / Lista X · Grupo Y)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ItemAgrupamento extends StatelessWidget {
+  final String rotulo;
+  final int qtdPeriodos;
+  final Color cor;
+  final bool selecionado;
+  final VoidCallback onTap;
+
+  static const _slate900 = Color(0xFF0F172A);
+  static const _slate600 = Color(0xFF475569);
+
+  const _ItemAgrupamento({
+    required this.rotulo,
+    required this.qtdPeriodos,
+    required this.cor,
+    required this.selecionado,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 100),
+        padding: const EdgeInsets.fromLTRB(48, 10, 16, 10),
+        color: selecionado ? cor.withOpacity(0.07) : Colors.transparent,
+        child: Row(
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 100),
+              width: 5,
+              height: 5,
+              margin: const EdgeInsets.only(right: 10),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: selecionado ? cor : cor.withOpacity(0.3),
+              ),
+            ),
+            Expanded(
+              child: Text(
+                rotulo,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: selecionado ? FontWeight.w700 : FontWeight.w500,
+                  color: selecionado ? cor : _slate900,
+                ),
+              ),
+            ),
+            Text(
+              '$qtdPeriodos per.',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: selecionado ? cor.withOpacity(0.8) : _slate600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Badge pequeno para o cabeçalho do material
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _BadgeCategoria extends StatelessWidget {
+  final String label;
+  final Color cor;
+
+  const _BadgeCategoria({required this.label, required this.cor});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+      decoration: BoxDecoration(
+        color: cor.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 9,
+          fontWeight: FontWeight.w700,
+          color: cor.withOpacity(0.8),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Widget: Painel direito do modo Histórico SAP
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _PainelDetalheHistorico extends StatelessWidget {
+  final _MaterialHistorico? material;
+  final _EntradaHistoricoSap? entrada;
+
+  static const _laranja = Color(0xFFFF6B00);
+  static const _azul = Color(0xFF0EA5E9);
+  static const _slate900 = Color(0xFF0F172A);
+  static const _slate600 = Color(0xFF475569);
+  static const _slate200 = Color(0xFFE2E8F0);
+
+  const _PainelDetalheHistorico({this.material, this.entrada});
+
+  @override
+  Widget build(BuildContext context) {
+    if (material == null || entrada == null) {
+      return const _EstadoVazio(
+        icon: Icons.touch_app_outlined,
+        titulo: 'Selecione um período',
+        subtitulo:
+            'Expanda um agrupamento e clique em um período para ver o gráfico.',
+      );
+    }
+
+    // Monta vigências do mesmo agrupamento para o gráfico
+    final vigencias =
+        material!.entradas
+            .where((e) => e.chaveAgrupamento == entrada!.chaveAgrupamento)
+            .map((e) {
+              final datab = _parseSapDate(e.datab);
+              if (datab == null) return null;
+              return _EntradaVigencia(
+                inicio: datab,
+                fim: _parseSapDate(e.datbi),
+                preco: e.kbetr,
+                rawDatab: e.datab,
+                rawDatabi: e.datbi,
+              );
+            })
+            .whereType<_EntradaVigencia>()
+            .toList()
+          ..sort((a, b) => a.inicio.compareTo(b.inicio));
+
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Card cabeçalho ──
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _slate200),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        material!.descricao ?? material!.matnr,
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w900,
+                          color: _slate900,
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Código SAP: ${material!.matnr}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontFamily: 'monospace',
+                          color: _slate600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: (entrada!.isGrupo ? _azul : _laranja)
+                            .withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            entrada!.isGrupo
+                                ? Icons.account_tree_rounded
+                                : Icons.list_alt_rounded,
+                            size: 12,
+                            color: entrada!.isGrupo ? _azul : _laranja,
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            entrada!.rotulo,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: entrada!.isGrupo ? _azul : _laranja,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'PREÇO SELECIONADO',
+                      style: TextStyle(
+                        fontSize: 9,
+                        letterSpacing: 0.8,
+                        fontWeight: FontWeight.w700,
+                        color: _slate600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'R\$ ${entrada!.kbetr.toStringAsFixed(2).replaceAll('.', ',')}',
+                      style: const TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w900,
+                        color: _laranja,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                    if (entrada!.kgSug != null && entrada!.kgSug! > 0)
+                      Text(
+                        'Sugerido/kg: R\$ ${entrada!.kgSug!.toStringAsFixed(2).replaceAll('.', ',')}',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: _slate600,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          // ── Card gráfico ──
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _slate200),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.show_chart_rounded,
+                      color: _laranja,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Evolução de Preço — Histórico SAP',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: _slate900,
+                      ),
+                    ),
+                    const Spacer(),
+                    if (vigencias.isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _laranja.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          '${vigencias.length} período${vigencias.length == 1 ? '' : 's'}',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: _laranja,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                vigencias.isEmpty
+                    ? SizedBox(
+                        height: 160,
+                        child: Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.bar_chart_rounded,
+                                size: 40,
+                                color: Colors.grey.shade200,
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                'Sem períodos de vigência',
+                                style: TextStyle(
+                                  color: Colors.grey.shade400,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    : _GraficoComScroll(vigencias: vigencias),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+        ],
+      ),
+    );
+  }
+
+  static DateTime? _parseSapDate(String s) {
+    if (s.length != 8) return null;
+    try {
+      return DateTime(
+        int.parse(s.substring(0, 4)),
+        int.parse(s.substring(4, 6)),
+        int.parse(s.substring(6, 8)),
+      );
+    } catch (_) {
+      return null;
+    }
   }
 }
 

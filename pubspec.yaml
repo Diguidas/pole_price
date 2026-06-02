@@ -34,6 +34,7 @@ flutter:
 
   assets:
     - assets/logo.png
+    - assets/logo_branca.png
 
   fonts:
     - family: Poppins

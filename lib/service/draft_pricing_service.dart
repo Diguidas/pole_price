@@ -47,7 +47,9 @@ class DraftPricingService {
     final futures = await Future.wait<dynamic>([
       supabase
           .from('price_draft_items')
-          .select('product_id, old_price, new_price, datab, datbi, origem_material')
+          .select(
+            'product_id, old_price, new_price, datab, datbi, origem_material',
+          )
           .eq('draft_id', draftId),
       supabase
           .from('price_draft_targets')
@@ -55,7 +57,9 @@ class DraftPricingService {
           .eq('draft_id', draftId),
       supabase
           .from('price_draft_exceptions')
-          .select('target_list_id, level, adjust_type, value, cluster_id, material_id')
+          .select(
+            'target_list_id, level, adjust_type, value, cluster_id, material_id',
+          )
           .eq('draft_id', draftId),
     ]);
 
@@ -68,7 +72,8 @@ class DraftPricingService {
     // old_price = preço que estava no SAP antes da edição
     final Map<String, double> precoNovoPorPid = {};
     final Map<String, double> precoAntigoPorPid = {};
-    final Map<String, String> descricaoPorPid = {}; // preenchido abaixo se disponível
+    final Map<String, String> descricaoPorPid =
+        {}; // preenchido abaixo se disponível
 
     for (final item in itensRes) {
       final pid = item['product_id']?.toString();
@@ -113,7 +118,7 @@ class DraftPricingService {
           precoAntigo: precoAntigo,
           precoNovo: precoNovo,
           origem: 'Ajuste manual',
-          foiEditado: true,
+          foiEditado: precoNovo != precoAntigo,
         ),
       );
     }
@@ -151,7 +156,9 @@ class DraftPricingService {
     };
 
     // ── 6. Clusters dos produtos editados (para aplicar exceções) ────────
-    final clusterMap = await _clusterMapForProducts(precoNovoPorPid.keys.toList());
+    final clusterMap = await _clusterMapForProducts(
+      precoNovoPorPid.keys.toList(),
+    );
 
     // ── 7. Processa cada lista filha ─────────────────────────────────────
     for (final targetListId in targetIds) {
@@ -162,20 +169,24 @@ class DraftPricingService {
           .toList();
 
       if (regrasFilha.isEmpty) {
-        explicacoes.add('• Lista filha "$nomeListaFilha": herda preços da lista mãe.');
+        explicacoes.add(
+          '• Lista filha "$nomeListaFilha": herda preços da lista mãe.',
+        );
       } else {
-        final niveisTxt = regrasFilha.map((r) {
-          final nivel = r['level']?.toString() ?? '';
-          final tipo = r['adjust_type']?.toString() ?? 'percentual';
-          final valor = _toDouble(r['value']) ?? 0.0;
-          final sufixo = tipo == 'percentual' ? '%' : ' R\$';
-          final nivelLabel = nivel == 'full_table'
-              ? 'toda a lista'
-              : nivel == 'material_group'
-              ? 'grupo específico'
-              : 'material específico';
-          return '+$valor$sufixo em $nivelLabel';
-        }).join(', ');
+        final niveisTxt = regrasFilha
+            .map((r) {
+              final nivel = r['level']?.toString() ?? '';
+              final tipo = r['adjust_type']?.toString() ?? 'percentual';
+              final valor = _toDouble(r['value']) ?? 0.0;
+              final sufixo = tipo == 'percentual' ? '%' : ' R\$';
+              final nivelLabel = nivel == 'full_table'
+                  ? 'toda a lista'
+                  : nivel == 'material_group'
+                  ? 'grupo específico'
+                  : 'material específico';
+              return '+$valor$sufixo em $nivelLabel';
+            })
+            .join(', ');
         explicacoes.add('• Lista filha "$nomeListaFilha": $niveisTxt.');
       }
 
@@ -201,7 +212,9 @@ class DraftPricingService {
           if (melhorRegra != null) {
             precoNovo = _aplicarRegra(melhorRegra, precoBase);
             final sinal = melhorRegra.valor >= 0 ? '+' : '';
-            final sufixo = melhorRegra.adjustType == 'percentual' ? '%' : ' R\$';
+            final sufixo = melhorRegra.adjustType == 'percentual'
+                ? '%'
+                : ' R\$';
             origemStr = 'Reajuste $sinal${melhorRegra.valor}$sufixo';
           } else {
             precoNovo = precoBase;
@@ -220,7 +233,7 @@ class DraftPricingService {
             precoAntigo: precoAntigoMae,
             precoNovo: precoNovo,
             origem: origemStr,
-            foiEditado: true,
+            foiEditado: precoNovo != precoAntigoMae,
           ),
         );
       }
@@ -234,33 +247,125 @@ class DraftPricingService {
     );
   }
 
-  /// Publica preços aprovados de volta ao SAP via edge function,
-  /// e marca o draft como aprovado no Supabase.
   Future<int> applyDraft(String draftId) async {
-    final preview = await buildPreview(draftId);
+    final itemsRes = await supabase
+        .from('price_draft_items')
+        .select(
+          'product_id, new_price, datab, datbi, konwa, kmein, krech, mxwrt, sap_status',
+        )
+        .eq('draft_id', draftId);
 
-    final alterados = preview.materiais
-        .where((m) => m.foiEditado)
-        .toList();
+    final items = itemsRes as List;
+    if (items.isEmpty)
+      throw Exception('Nenhum item encontrado neste rascunho.');
 
-    if (alterados.isEmpty) {
-      throw Exception('Nenhum preço foi alterado neste rascunho.');
+    final draftData = await supabase
+        .from('price_drafts')
+        .select('master_list_id')
+        .eq('id', draftId)
+        .single();
+
+    final String pltyp = draftData['master_list_id']?.toString() ?? '';
+    if (pltyp.isEmpty) throw Exception('Draft sem lista mãe (pltyp) definida.');
+
+    final results = await Future.wait([
+      supabase
+          .from('price_draft_targets')
+          .select('target_list_id')
+          .eq('draft_id', draftId),
+      supabase
+          .from('price_draft_exceptions')
+          .select(
+            'target_list_id, level, adjust_type, value, cluster_id, material_id',
+          )
+          .eq('draft_id', draftId),
+    ]);
+
+    final targetsRes = results[0] as List;
+    final excecoesRes = results[1] as List;
+
+    // DEBUG — remove depois
+    print('DEBUG draftId: $draftId');
+    print('DEBUG targetsRes: $targetsRes');
+    print('DEBUG excecoesRes: $excecoesRes');
+    print('DEBUG pltyp: $pltyp');
+
+    final pids = items.map((i) => i['product_id']?.toString() ?? '').toList();
+    final clusterMap = await _clusterMapForProducts(pids);
+
+    // Envia lista mãe
+    await _enviarPayload(pltyp, _montarSapItems(items, clusterMap, []));
+
+    // Envia cada lista filha com regras aplicadas
+    for (final target in targetsRes) {
+      final filhaPltyp = target['target_list_id']?.toString() ?? '';
+      if (filhaPltyp.isEmpty) continue;
+
+      final regrasFilha = excecoesRes
+          .where((e) => e['target_list_id']?.toString() == filhaPltyp)
+          .toList();
+
+      await _enviarPayload(
+        filhaPltyp,
+        _montarSapItems(items, clusterMap, regrasFilha),
+      );
     }
 
-    // Agrupa por lista para envio
-    final Map<String, List<MaterialDraftPreview>> porLista = {};
-    for (final m in alterados) {
-      porLista.putIfAbsent(m.listaId, () => []).add(m);
-    }
-
-    // Salva os novos preços em price_draft_items para o push_sap_prices usar
-    // (o applyDraft não grava mais em materials — envia ao SAP na aprovação)
     await supabase
         .from('price_drafts')
         .update({'status': 'approved'})
         .eq('id', draftId);
 
-    return alterados.length;
+    return items.length;
+  }
+
+  List<Map<String, dynamic>> _montarSapItems(
+    List items,
+    Map<String, String> clusterMap,
+    List regras,
+  ) {
+    return items.map((item) {
+      final matnr = item['product_id']?.toString() ?? '';
+      double kbetr = _toDouble(item['new_price']) ?? 0.0;
+
+      if (regras.isNotEmpty) {
+        final melhor = _melhorRegra(
+          regras,
+          productId: matnr,
+          clusterId: clusterMap[matnr],
+        );
+        if (melhor != null) kbetr = _aplicarRegra(melhor, kbetr);
+      }
+
+      return {
+        'MATNR': matnr,
+        'KBETR': kbetr,
+        'KONWA': item['konwa']?.toString() ?? 'BRL',
+        'KMEIN': item['kmein']?.toString() ?? 'KG',
+        'KRECH': item['krech']?.toString() ?? 'C',
+        'DATAB': item['datab']?.toString() ?? '',
+        'DATBI': item['datbi']?.toString() ?? '',
+        'MXWRT': _toDouble(item['mxwrt']) ?? 0.0,
+        'STATUS': item['sap_status']?.toString() ?? '',
+      };
+    }).toList();
+  }
+
+  Future<void> _enviarPayload(
+    String pltyp,
+    List<Map<String, dynamic>> sapItems,
+  ) async {
+    final payload = {'pltyp': pltyp, 'items': sapItems};
+    print('Enviando ao SAP: $payload');
+    final res = await supabase.functions.invoke(
+      'push-sap-prices',
+      body: payload,
+    );
+    if (res.status != 200) {
+      throw Exception(
+        'Falha ao enviar lista $pltyp (${res.status}): ${res.data}',
+      );
+    }
   }
 
   Future<Map<String, String>> _clusterMapForProducts(List<String> codes) async {

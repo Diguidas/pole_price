@@ -3,25 +3,32 @@ import 'package:pole_price/models/material_preco.dart';
 import 'package:pole_price/models/pricelist_model.dart';
 import 'package:pole_price/models/regra_ajuste.dart';
 
+/// Resultado do bottom sheet de resumo.
+/// [justificativa] é obrigatória; [sapStatus] é o status SAP escolhido pelo usuário.
+class ResumoDraftResult {
+  final String justificativa;
+  final String sapStatus; // '' = normal, 'L' = bloqueado p/ liberação, 'X' = deletado
+
+  const ResumoDraftResult({
+    required this.justificativa,
+    required this.sapStatus,
+  });
+}
+
 /// Bottom sheet / tela de resumo exibida ao clicar em "Salvar para aprovação".
 ///
 /// Mostra:
 ///   - Lista mãe (master list)
 ///   - Listas destino (targets) com suas regras de ajuste
 ///   - Todos os materiais alterados (preço antigo × novo)
+///   - Seletor de status SAP (normal / bloqueado p/ liberação / deletado)
+///   - Campo obrigatório de justificativa
 ///
 /// Uso:
-///   final confirm = await showResumoDraft(
-///     context: context,
-///     listasMae: controller.listas,
-///     selecionada: controller.selecionada!,
-///     materiais: controller.materiais,
-///     targets: controller.targets,
-///     regras: controller.regras,
-///   );
-///   if (confirm == true) await controller.salvar();
+///   final result = await showResumoDraft(...);
+///   if (result != null) await controller.salvar(justificativa: result.justificativa, sapStatus: result.sapStatus);
 
-Future<bool?> showResumoDraft({
+Future<ResumoDraftResult?> showResumoDraft({
   required BuildContext context,
   required List<PriceList> listasMae,
   required PriceList selecionada,
@@ -29,7 +36,7 @@ Future<bool?> showResumoDraft({
   required List<String> targets,
   required List<RegraAjuste> regras,
 }) {
-  return showModalBottomSheet<bool>(
+  return showModalBottomSheet<ResumoDraftResult>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
@@ -43,7 +50,7 @@ Future<bool?> showResumoDraft({
   );
 }
 
-class _ResumoDraftSheet extends StatelessWidget {
+class _ResumoDraftSheet extends StatefulWidget {
   final List<PriceList> listasMae;
   final PriceList selecionada;
   final List<MaterialPreco> materiais;
@@ -58,15 +65,37 @@ class _ResumoDraftSheet extends StatelessWidget {
     required this.regras,
   });
 
+  @override
+  State<_ResumoDraftSheet> createState() => _ResumoDraftSheetState();
+}
+
+class _ResumoDraftSheetState extends State<_ResumoDraftSheet> {
   static const _laranja = Color(0xFFFF6B00);
 
-  // Materiais que tiveram o preço alterado
-  List<MaterialPreco> get _alterados =>
-      materiais.where((m) => m.novoPreco > 0 && m.novoPreco != m.precoAtual).toList();
+  late final TextEditingController _justificativaCtrl;
+  bool _justificativaVazia = false;
 
-  // Listas destino com nome
+  // '' = normal/ativo, 'L' = bloqueado p/ liberação, 'X' = deletado
+  String _sapStatus = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _justificativaCtrl = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _justificativaCtrl.dispose();
+    super.dispose();
+  }
+
+  List<MaterialPreco> get _alterados => widget.materiais
+      .where((m) => m.novoPreco > 0 && m.novoPreco != m.precoAtual)
+      .toList();
+
   List<PriceList> get _listasDestino =>
-      listasMae.where((l) => targets.contains(l.id)).toList();
+      widget.listasMae.where((l) => widget.targets.contains(l.id)).toList();
 
   @override
   Widget build(BuildContext context) {
@@ -74,8 +103,8 @@ class _ResumoDraftSheet extends StatelessWidget {
     final listasDestino = _listasDestino;
 
     return DraggableScrollableSheet(
-      initialChildSize: 0.88,
-      maxChildSize: 0.95,
+      initialChildSize: 0.92,
+      maxChildSize: 0.97,
       minChildSize: 0.5,
       expand: false,
       builder: (_, scrollController) => Container(
@@ -133,7 +162,7 @@ class _ResumoDraftSheet extends StatelessWidget {
                   ),
                   IconButton(
                     icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context, false),
+                    onPressed: () => Navigator.pop(context),
                   ),
                 ],
               ),
@@ -153,7 +182,7 @@ class _ResumoDraftSheet extends StatelessWidget {
                   _sectionCard(
                     icon: Icons.table_chart_outlined,
                     titulo: 'Lista mãe',
-                    child: _chipLista(selecionada.description, isPrimary: true),
+                    child: _chipLista(widget.selecionada.description, isPrimary: true),
                   ),
                   const SizedBox(height: 12),
 
@@ -165,7 +194,7 @@ class _ResumoDraftSheet extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: listasDestino.map((lista) {
-                          final regrasLista = regras
+                          final regrasLista = widget.regras
                               .where((r) => r.targetListId == lista.id)
                               .toList();
                           return _listaDestinoItem(lista, regrasLista);
@@ -184,14 +213,75 @@ class _ResumoDraftSheet extends StatelessWidget {
                         ? _emptyState('Nenhum preço foi alterado manualmente.')
                         : Column(
                             children: [
-                              // Cabeçalho da tabela
                               _tabelaHeader(),
                               const Divider(height: 1),
                               ...alterados.map((m) => _materialRow(m)),
                             ],
                           ),
                   ),
-                  const SizedBox(height: 80), // espaço para os botões
+                  const SizedBox(height: 12),
+
+                  // ── Status SAP ────────────────────────────────────
+                  _sectionCard(
+                    icon: Icons.flag_outlined,
+                    titulo: 'Status do preço no SAP *',
+                    child: _sapStatusPicker(),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // ── Justificativa ─────────────────────────────────
+                  _sectionCard(
+                    icon: Icons.comment_outlined,
+                    titulo: 'Justificativa *',
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        TextField(
+                          controller: _justificativaCtrl,
+                          maxLines: 3,
+                          onChanged: (_) {
+                            if (_justificativaVazia) {
+                              setState(() => _justificativaVazia = false);
+                            }
+                          },
+                          decoration: InputDecoration(
+                            hintText: 'Explique o motivo das alterações de preço...',
+                            hintStyle: TextStyle(
+                                color: Colors.grey.shade400, fontSize: 13),
+                            errorText: _justificativaVazia
+                                ? 'Justificativa obrigatória para envio.'
+                                : null,
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(
+                                color: _justificativaVazia
+                                    ? Colors.red.shade300
+                                    : Colors.grey.shade300,
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide:
+                                  const BorderSide(color: _laranja, width: 1.5),
+                            ),
+                            errorBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide:
+                                  BorderSide(color: Colors.red.shade300),
+                            ),
+                            focusedErrorBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(
+                                  color: Colors.red.shade400, width: 1.5),
+                            ),
+                            isDense: true,
+                            contentPadding: const EdgeInsets.all(12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 80),
                 ],
               ),
             ),
@@ -203,6 +293,89 @@ class _ResumoDraftSheet extends StatelessWidget {
       ),
     );
   }
+
+  // ── Seletor de status SAP ─────────────────────────────────────────────────
+
+  Widget _sapStatusPicker() {
+    final opcoes = [
+      _SapStatusOpcao(
+        valor: '',
+        label: 'Ativo / Normal',
+        descricao: 'Preço publicado e disponível para uso imediato.',
+        icon: Icons.check_circle_outline,
+        cor: Colors.green.shade600,
+      ),
+      _SapStatusOpcao(
+        valor: 'L',
+        label: 'Bloqueado p/ liberação',
+        descricao: 'Preço salvo mas aguarda liberação adicional no SAP.',
+        icon: Icons.lock_outline,
+        cor: Colors.orange.shade700,
+      ),
+      _SapStatusOpcao(
+        valor: 'X',
+        label: 'Deletado',
+        descricao: 'Marca o registro como deletado na lista SAP.',
+        icon: Icons.delete_outline,
+        cor: Colors.red.shade600,
+      ),
+    ];
+
+    return Column(
+      children: opcoes.map((op) {
+        final selecionado = _sapStatus == op.valor;
+        return GestureDetector(
+          onTap: () => setState(() => _sapStatus = op.valor),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: selecionado ? op.cor.withOpacity(0.06) : Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: selecionado ? op.cor : Colors.grey.shade200,
+                width: selecionado ? 1.5 : 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(op.icon, color: selecionado ? op.cor : Colors.grey.shade400, size: 20),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        op.label,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: selecionado ? op.cor : Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        op.descricao,
+                        style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                      ),
+                    ],
+                  ),
+                ),
+                if (selecionado)
+                  Icon(Icons.radio_button_checked, color: op.cor, size: 18)
+                else
+                  Icon(Icons.radio_button_unchecked,
+                      color: Colors.grey.shade300, size: 18),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  // ── Demais widgets internos ───────────────────────────────────────────────
 
   Widget _badgesResumo(int qtdMateriais, int qtdListas) {
     return Row(
@@ -227,7 +400,7 @@ class _ResumoDraftSheet extends StatelessWidget {
         const SizedBox(width: 10),
         Expanded(
           child: _badgeCard(
-            valor: regras.length.toString(),
+            valor: widget.regras.length.toString(),
             label: 'Exceções\nconfigur.',
             icon: Icons.rule_outlined,
             cor: Colors.purple.shade600,
@@ -583,7 +756,7 @@ class _ResumoDraftSheet extends StatelessWidget {
         children: [
           Expanded(
             child: OutlinedButton(
-              onPressed: () => Navigator.pop(context, false),
+              onPressed: () => Navigator.pop(context),
               style: OutlinedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 side: BorderSide(color: Colors.grey.shade300),
@@ -600,9 +773,23 @@ class _ResumoDraftSheet extends StatelessWidget {
             child: ElevatedButton.icon(
               icon: const Icon(Icons.check_circle_outline, size: 18),
               label: const Text('Confirmar e enviar'),
-              onPressed: alterados.isEmpty && targets.isEmpty
+              onPressed: alterados.isEmpty && widget.targets.isEmpty
                   ? null
-                  : () => Navigator.pop(context, true),
+                  : () {
+                      final justificativa =
+                          _justificativaCtrl.text.trim();
+                      if (justificativa.isEmpty) {
+                        setState(() => _justificativaVazia = true);
+                        return;
+                      }
+                      Navigator.pop(
+                        context,
+                        ResumoDraftResult(
+                          justificativa: justificativa,
+                          sapStatus: _sapStatus,
+                        ),
+                      );
+                    },
               style: ElevatedButton.styleFrom(
                 backgroundColor: _laranja,
                 foregroundColor: Colors.white,
@@ -620,4 +807,22 @@ class _ResumoDraftSheet extends StatelessWidget {
 
   String _fmt(double v) =>
       'R\$ ${v.toStringAsFixed(2).replaceAll('.', ',')}';
+}
+
+// ── Modelo interno para as opções de status SAP ───────────────────────────────
+
+class _SapStatusOpcao {
+  final String valor;
+  final String label;
+  final String descricao;
+  final IconData icon;
+  final Color cor;
+
+  const _SapStatusOpcao({
+    required this.valor,
+    required this.label,
+    required this.descricao,
+    required this.icon,
+    required this.cor,
+  });
 }

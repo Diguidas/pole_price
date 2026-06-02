@@ -46,6 +46,9 @@ class PermissaoController extends ChangeNotifier {
   bool get isGestor => _permissao?.isGestor ?? false;
   bool get isAprovador => _permissao?.isAprovador ?? false;
 
+  /// Pode clicar em Aprovar/Rejeitar na tela de aprovações.
+  bool get podeAprovar => isAdmin || isAprovador;
+
   bool get podeVerPrecos => _permissao?.podeVerPrecos ?? false;
   bool get podeVerAprovacoes => _permissao?.podeVerAprovacoes ?? false;
   bool get podeVerGrupos => _permissao?.podeVerGrupos ?? false;
@@ -116,4 +119,3 @@ class PermissaoController extends ChangeNotifier {
   Future<List<UsuarioPermissao>> listarTodos() => _service.listarTodos();
   bool get isVisualizador => _permissao?.role == UserRole.visualizador;
 }
-

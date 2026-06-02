@@ -16,9 +16,13 @@ class SapSyncService {
     required String pltyp,
     String? datab,
     String? datbi,
-    String? databOp, // NOVO
-    String? datbiOp, // NOVO
+    String? databOp,
+    String? datbiOp,
     String? matnr,
+    String? kznep,      // valor do filtro inativo: 'I' = inativo, null = sem filtro
+    String? kznepOp,    // operador: 'EQ' = apenas inativos, 'NE' = excluir inativos
+    String? loevm,      // valor do filtro bloqueado: 'X' = bloqueado, null = sem filtro
+    String? loevmOp,    // operador: 'EQ' = apenas bloqueados, 'NE' = excluir bloqueados
   }) async {
     final res = await supabase.functions.invoke(
       'swift-handler',
@@ -26,9 +30,13 @@ class SapSyncService {
         'pltyp': pltyp,
         if (datab != null) 'datab': datab,
         if (datbi != null) 'datbi': datbi,
-        if (databOp != null) 'datab_op': databOp, // NOVO
-        if (datbiOp != null) 'datbi_op': datbiOp, // NOVO
+        if (databOp != null) 'datab_op': databOp,
+        if (datbiOp != null) 'datbi_op': datbiOp,
         if (matnr != null) 'matnr': matnr,
+        if (kznep != null) 'kznep': kznep,
+        if (kznepOp != null) 'kznep_op': kznepOp,
+        if (loevm != null) 'loevm_ko': loevm,
+        if (loevmOp != null) 'loevm_ko_op': loevmOp,
       },
     );
 
@@ -56,8 +64,12 @@ class SapSyncService {
     required String kdgrp,
     String? datab,
     String? datbi,
-    String? databOp, // NOVO
+    String? databOp,
     String? datbiOp,
+    String? kznep,
+    String? kznepOp,
+    String? loevm,
+    String? loevmOp,
   }) async {
     final res = await supabase.functions.invoke(
       'sync-price-group',
@@ -66,8 +78,12 @@ class SapSyncService {
         'kdgrp': kdgrp,
         if (datab != null) 'datab': datab,
         if (datbi != null) 'datbi': datbi,
-        if (databOp != null) 'datab_op': databOp, // NOVO
-        if (datbiOp != null) 'datbi_op': datbiOp, // NOVO
+        if (databOp != null) 'datab_op': databOp,
+        if (datbiOp != null) 'datbi_op': datbiOp,
+        if (kznep != null) 'kznep': kznep,
+        if (kznepOp != null) 'kznep_op': kznepOp,
+        if (loevm != null) 'loevm_ko': loevm,
+        if (loevmOp != null) 'loevm_ko_op': loevmOp,
       },
     );
 
@@ -111,6 +127,60 @@ class SapSyncService {
     }
   }
 
+  /// Busca o histórico de preços de um ou mais materiais via action "historico".
+  Future<List<Map<String, dynamic>>> fetchHistoricoRaw({
+    required List<String> matnrs,
+    String? datab,
+    String? datbi,
+    String? databOp,
+    String? datbiOp,
+  }) async {
+    if (matnrs.isEmpty) return [];
+
+    final body = <String, dynamic>{
+      'materials': matnrs.map((m) => {'matnr': m}).toList(),
+      if (datab != null) 'datab': datab,
+      if (datab != null) 'datab_op': databOp ?? 'GE',
+      if (datbi != null) 'datbi': datbi,
+      if (datbi != null) 'datbi_op': datbiOp ?? 'LE',
+    };
+
+    final res = await supabase.functions.invoke(
+      'get-price-historic',
+      body: body,
+    );
+
+    if (res.status == 204) return [];
+    if (res.status != 200) {
+      throw Exception(
+        'Falha ao buscar histórico SAP (${res.status}): ${res.data}',
+      );
+    }
+
+    final raw = res.data;
+    List<dynamic> data = [];
+    if (raw is List) {
+      data = raw;
+    } else if (raw is Map) {
+      final val = raw['data'];
+      if (val is List) data = val;
+    }
+
+    return data.whereType<Map<String, dynamic>>().toList();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  /// Interpreta valores SAP que significam "marcado": 'X', 'x', 'I', true, '1', 1
+  /// KZNEP usa 'I' para inativo; LOEVM_KO usa 'X' para bloqueado.
+  static bool _isX(dynamic v) {
+    if (v == null) return false;
+    final s = v.toString().trim().toUpperCase();
+    return s == 'X' || s == 'I' || s == '1' || s == 'TRUE';
+  }
+
   // ---------------------------------------------------------------------------
   // Mapeamento interno
   // ---------------------------------------------------------------------------
@@ -121,13 +191,10 @@ class SapSyncService {
     String? datbi,
     String? kdgrp,
   }) async {
-    print('ENTRIES RECEBIDOS: ${entries.length}');
     final matnrs = <String>{};
     for (final entry in entries) {
       final _matRaw = entry['MATERIALS'] ?? entry['materials'];
-      print('MATERIALS TYPE: ${_matRaw.runtimeType} | VALUE: $_matRaw');
       final materials = _matRaw is List ? _matRaw : <dynamic>[];
-      print('MATERIALS LENGTH: ${materials.length}');
       for (final m in materials) {
         final matnr = (m['MATNR'] ?? m['matnr'])?.toString();
         if (matnr != null && matnr.isNotEmpty) {
@@ -136,7 +203,6 @@ class SapSyncService {
       }
     }
 
-    print('MATNRS COLETADOS: $matnrs');
     if (matnrs.isEmpty) return [];
 
     // Busca descrições em products
@@ -178,11 +244,19 @@ class SapSyncService {
 
         final matnr = matnrRaw.replaceAll(RegExp(r'^0+'), '');
         final product = productMap[matnr];
-        // Depois:
         final kbetr = (m['KBETR'] ?? m['kbetr'])?.toString() ?? '0';
         final kgSugRaw = m['KG_SUG'] ?? m['kg_sug'] ?? m['KBPER'] ?? m['kbper'];
         final kgSug = kgSugRaw != null
             ? double.tryParse(kgSugRaw.toString())
+            : null;
+
+        // Campos necessários para push de volta ao SAP
+        final konwa = (m['KONWA'] ?? m['konwa'])?.toString();
+        final kmein = (m['KMEIN'] ?? m['kmein'])?.toString();
+        final krech = (m['KRECH'] ?? m['krech'])?.toString();
+        final mxwrtRaw = m['MXWRT'] ?? m['mxwrt'];
+        final mxwrt = mxwrtRaw != null
+            ? double.tryParse(mxwrtRaw.toString())
             : null;
 
         result.add(
@@ -195,7 +269,13 @@ class SapSyncService {
             datab: entryDatab,
             datbi: entryDatbi,
             origemMaterial: OrigemMaterial.sap,
-            kgSug: (kgSug != null && kgSug > 0) ? kgSug : null, // ← ADICIONADO
+            kgSug: (kgSug != null && kgSug > 0) ? kgSug : null,
+            konwa: konwa,
+            kmein: kmein,
+            krech: krech,
+            mxwrt: mxwrt,
+            bloqueado: _isX(m['LOEVM_KO'] ?? m['loevm_ko']),
+            inativo: _isX(m['KZNEP'] ?? m['kznep']),
           ),
         );
       }

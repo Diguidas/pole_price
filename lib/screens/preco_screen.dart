@@ -18,6 +18,7 @@ class _PrecoScreenState extends State<PrecoScreen> {
   void initState() {
     super.initState();
     controller = PrecoController.instance;
+    controller.iniciarNovaSessao(); // ← limpa sessão anterior
     controller.addListener(_rebuild);
 
     // Parâmetros já foram configurados no controller pelo selecao_modo_dialog
@@ -62,8 +63,8 @@ class _PrecoScreenState extends State<PrecoScreen> {
                               child: PainelEsquerdo(controller: controller),
                             ),
                             const SizedBox(width: 20),
-                            SizedBox(
-                              width: 380,
+                            Expanded(
+                              flex: 2,
                               child: PainelDireito(controller: controller),
                             ),
                           ],
