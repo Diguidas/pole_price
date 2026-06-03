@@ -284,12 +284,6 @@ class DraftPricingService {
     final targetsRes = results[0] as List;
     final excecoesRes = results[1] as List;
 
-    // DEBUG — remove depois
-    print('DEBUG draftId: $draftId');
-    print('DEBUG targetsRes: $targetsRes');
-    print('DEBUG excecoesRes: $excecoesRes');
-    print('DEBUG pltyp: $pltyp');
-
     final pids = items.map((i) => i['product_id']?.toString() ?? '').toList();
     final clusterMap = await _clusterMapForProducts(pids);
 
@@ -356,7 +350,6 @@ class DraftPricingService {
     List<Map<String, dynamic>> sapItems,
   ) async {
     final payload = {'pltyp': pltyp, 'items': sapItems};
-    print('Enviando ao SAP: $payload');
     final res = await supabase.functions.invoke(
       'push-sap-prices',
       body: payload,

@@ -50,6 +50,7 @@ class PermissaoController extends ChangeNotifier {
   bool get podeAprovar => isAdmin || isAprovador;
 
   bool get podeVerPrecos => _permissao?.podeVerPrecos ?? false;
+  bool get podeVerRascunhos => _permissao?.podeVerRascunhos ?? false;
   bool get podeVerAprovacoes => _permissao?.podeVerAprovacoes ?? false;
   bool get podeVerGrupos => _permissao?.podeVerGrupos ?? false;
   bool get podeVerPoliticas => _permissao?.podeVerPoliticas ?? false;
@@ -79,10 +80,8 @@ class PermissaoController extends ChangeNotifier {
 
     try {
       final email = Supabase.instance.client.auth.currentUser?.email;
-      print('=== EMAIL DO USUÁRIO LOGADO: $email ===');
       if (email == null) {
         _erro = 'Usuário não autenticado.';
-        print('=== ERRO: usuário não autenticado ===');
         return;
       }
 

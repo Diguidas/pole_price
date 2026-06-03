@@ -40,7 +40,11 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
 
   String _nomeCluster(String? id) {
     if (id == null) return '';
-    return c.clusters.where((cl) => cl.id == id).map((cl) => cl.name).firstOrNull ?? id;
+    return c.clusters
+            .where((cl) => cl.id == id)
+            .map((cl) => cl.name)
+            .firstOrNull ??
+        id;
   }
 
   // ── Abre dialog de busca de cluster ──────────────────────────────────────
@@ -49,11 +53,19 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
     if (c.clusters.isEmpty) await c.carregarClusters();
     if (!mounted) return;
 
+    print('Total materiais: ${c.materiais.length}');
+    print(
+      'Com clusterId: ${c.materiais.where((m) => m.clusterId != null).length}',
+    );
+    print('Clusters carregados: ${c.clusters.length}');
+
     // Apenas clusters que têm ao menos um material na sessão atual
     final clusterIdsDaSessao = c.materiais
         .where((m) => !m.removido && m.clusterId != null)
         .map((m) => m.clusterId!)
         .toSet();
+
+    print('IDs encontrados: $clusterIdsDaSessao');
     final clustersFiltrados = c.clusters
         .where((cl) => clusterIdsDaSessao.contains(cl.id))
         .toList();
@@ -96,9 +108,12 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
 
   @override
   Widget build(BuildContext context) {
-    final listasParaExcecao = c.listas.where((l) => c.targets.contains(l.id)).toList();
+    final listasParaExcecao = c.listas
+        .where((l) => c.targets.contains(l.id))
+        .toList();
 
-    if (_listaExcecaoSelecionada != null && !c.targets.contains(_listaExcecaoSelecionada)) {
+    if (_listaExcecaoSelecionada != null &&
+        !c.targets.contains(_listaExcecaoSelecionada)) {
       _listaExcecaoSelecionada = null;
     }
 
@@ -139,7 +154,12 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
               isExpanded: true,
               decoration: _inputDeco('Lista para configurar exceções'),
               items: listasParaExcecao
-                  .map((l) => DropdownMenuItem(value: l.id, child: Text(l.description)))
+                  .map(
+                    (l) => DropdownMenuItem(
+                      value: l.id,
+                      child: Text(l.description),
+                    ),
+                  )
                   .toList(),
               onChanged: (v) => setState(() => _listaExcecaoSelecionada = v),
             ),
@@ -148,7 +168,11 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
             // ── Cards de nível ──────────────────────────────────────
             const Text(
               'Nível da exceção',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.black87),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Colors.black87,
+              ),
             ),
             const SizedBox(height: 8),
             Row(
@@ -234,10 +258,12 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
                 Expanded(
                   child: TextField(
                     controller: _valorController,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    decoration: _inputDeco('Valor do ajuste').copyWith(
-                      suffixText: _tipo == 'Percentual' ? '%' : 'R\$',
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
                     ),
+                    decoration: _inputDeco(
+                      'Valor do ajuste',
+                    ).copyWith(suffixText: _tipo == 'Percentual' ? '%' : 'R\$'),
                     onChanged: (_) => setState(() {}),
                   ),
                 ),
@@ -245,7 +271,8 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
             ),
             const SizedBox(height: 12),
 
-            if (_listaExcecaoSelecionada != null && _valorController.text.isNotEmpty)
+            if (_listaExcecaoSelecionada != null &&
+                _valorController.text.isNotEmpty)
               _resumoRegra(),
 
             const SizedBox(height: 12),
@@ -255,25 +282,41 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
               width: double.infinity,
               child: OutlinedButton.icon(
                 icon: const Icon(Icons.add, size: 18, color: _laranja),
-                label: const Text('Adicionar exceção', style: TextStyle(color: _laranja)),
+                label: const Text(
+                  'Adicionar exceção',
+                  style: TextStyle(color: _laranja),
+                ),
                 style: OutlinedButton.styleFrom(
                   side: const BorderSide(color: _laranja),
                   padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
                 onPressed: _podeAdicionarRegra()
                     ? () {
-                        final valor = double.tryParse(_valorController.text) ?? 0;
-                        c.addRegra(RegraAjuste(
-                          targetListId: _listaExcecaoSelecionada!,
-                          nivel: _nivel,
-                          tipo: _tipo,
-                          valor: valor,
-                          clusterId: _nivel == 'Grupo' ? _clusterSelecionado?.id : null,
-                          clusterNome: _nivel == 'Grupo' ? _clusterSelecionado?.name : null,
-                          materialId: _nivel == 'Material' ? _materialSelecionado?.codigo : null,
-                          materialNome: _nivel == 'Material' ? _materialSelecionado?.description : null,
-                        ));
+                        final valor =
+                            double.tryParse(_valorController.text) ?? 0;
+                        c.addRegra(
+                          RegraAjuste(
+                            targetListId: _listaExcecaoSelecionada!,
+                            nivel: _nivel,
+                            tipo: _tipo,
+                            valor: valor,
+                            clusterId: _nivel == 'Grupo'
+                                ? _clusterSelecionado?.id
+                                : null,
+                            clusterNome: _nivel == 'Grupo'
+                                ? _clusterSelecionado?.name
+                                : null,
+                            materialId: _nivel == 'Material'
+                                ? _materialSelecionado?.codigo
+                                : null,
+                            materialNome: _nivel == 'Material'
+                                ? _materialSelecionado?.description
+                                : null,
+                          ),
+                        );
                         setState(() {
                           _valorController.clear();
                           _listaExcecaoSelecionada = null;
@@ -319,7 +362,9 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
               color: Colors.grey.shade50,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(8),
+              ),
             ),
             child: Row(
               children: [
@@ -335,7 +380,8 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
           ...c.regras.asMap().entries.map((entry) {
             final i = entry.key;
             final r = entry.value;
-            final nomeLista = c.listas
+            final nomeLista =
+                c.listas
                     .where((l) => l.id == r.targetListId)
                     .map((l) => l.description)
                     .firstOrNull ??
@@ -348,18 +394,27 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
               children: [
                 if (i > 0) const Divider(height: 1),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
                   child: Row(
                     children: [
                       Expanded(
                         flex: 3,
-                        child: Text(nomeLista,
-                            style: const TextStyle(fontSize: 12),
-                            overflow: TextOverflow.ellipsis),
+                        child: Text(
+                          nomeLista,
+                          style: const TextStyle(fontSize: 12),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       Expanded(
-                          flex: 2,
-                          child: Text(r.nivel, style: const TextStyle(fontSize: 12))),
+                        flex: 2,
+                        child: Text(
+                          r.nivel,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
                       Expanded(
                         flex: 4,
                         child: r.nivel == 'Material'
@@ -404,7 +459,11 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
                       ),
                       const SizedBox(width: 8),
                       IconButton(
-                        icon: const Icon(Icons.delete_outline, size: 16, color: Colors.red),
+                        icon: const Icon(
+                          Icons.delete_outline,
+                          size: 16,
+                          color: Colors.red,
+                        ),
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
                         onPressed: () => c.removeRegra(r),
@@ -452,7 +511,11 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, size: 18, color: ativo ? _laranja : Colors.grey.shade500),
+            Icon(
+              icon,
+              size: 18,
+              color: ativo ? _laranja : Colors.grey.shade500,
+            ),
             const SizedBox(height: 6),
             Text(
               label,
@@ -463,7 +526,10 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
               ),
             ),
             const SizedBox(height: 2),
-            Text(sub, style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+            Text(
+              sub,
+              style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+            ),
           ],
         ),
       ),
@@ -471,7 +537,8 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
   }
 
   Widget _resumoRegra() {
-    final nomeLista = c.listas
+    final nomeLista =
+        c.listas
             .where((l) => l.id == _listaExcecaoSelecionada)
             .map((l) => l.description)
             .firstOrNull ??
@@ -480,8 +547,8 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
     final nivelDesc = _nivel == 'Grupo'
         ? 'no grupo ${_nomeCluster(_clusterSelecionado?.id)}'
         : _nivel == 'Material'
-            ? 'no material ${_materialSelecionado?.codigo ?? ''} — ${_materialSelecionado?.description ?? ''}'
-            : 'em toda a tabela';
+        ? 'no material ${_materialSelecionado?.codigo ?? ''} — ${_materialSelecionado?.description ?? ''}'
+        : 'em toda a tabela';
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -505,20 +572,27 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
     );
   }
 
-  Widget _aviso(String msg,
-      {required IconData icon,
-      required Color cor,
-      required Color bg,
-      required Color border}) {
+  Widget _aviso(
+    String msg, {
+    required IconData icon,
+    required Color cor,
+    required Color bg,
+    required Color border,
+  }) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-          color: bg, borderRadius: BorderRadius.circular(8), border: Border.all(color: border)),
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: border),
+      ),
       child: Row(
         children: [
           Icon(icon, size: 16, color: cor),
           const SizedBox(width: 8),
-          Expanded(child: Text(msg, style: TextStyle(fontSize: 12, color: cor))),
+          Expanded(
+            child: Text(msg, style: TextStyle(fontSize: 12, color: cor)),
+          ),
         ],
       ),
     );
@@ -541,30 +615,48 @@ class _SecaoExcecoesState extends State<SecaoExcecoes> {
   }
 
   Widget _th(String label, {int flex = 1}) => Expanded(
-        flex: flex,
-        child: Text(label,
-            style: TextStyle(
-                fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade600)),
-      );
+    flex: flex,
+    child: Text(
+      label,
+      style: TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w600,
+        color: Colors.grey.shade600,
+      ),
+    ),
+  );
 
   Widget _thRight(String label, {required double width}) => SizedBox(
-        width: width,
-        child: Text(label,
-            textAlign: TextAlign.right,
-            style: TextStyle(
-                fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade600)),
-      );
+    width: width,
+    child: Text(
+      label,
+      textAlign: TextAlign.right,
+      style: TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w600,
+        color: Colors.grey.shade600,
+      ),
+    ),
+  );
 
   Widget _numeroBadge(String n) => Container(
-        width: 24,
-        height: 24,
-        decoration: BoxDecoration(color: _laranja, borderRadius: BorderRadius.circular(6)),
-        child: Center(
-          child: Text(n,
-              style: const TextStyle(
-                  color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+    width: 24,
+    height: 24,
+    decoration: BoxDecoration(
+      color: _laranja,
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: Center(
+      child: Text(
+        n,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+          fontSize: 13,
         ),
-      );
+      ),
+    ),
+  );
 }
 
 // ── Widget de campo picker (botão que abre dialog) ────────────────────────────
@@ -599,9 +691,14 @@ class _PickerField extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label,
-            style: const TextStyle(
-                fontSize: 12, fontWeight: FontWeight.w600, color: Colors.black87)),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: Colors.black87,
+          ),
+        ),
         const SizedBox(height: 6),
         InkWell(
           onTap: enabled && !loading ? onTap : null,
@@ -612,7 +709,9 @@ class _PickerField extends StatelessWidget {
               color: enabled ? Colors.white : Colors.grey.shade50,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
-                color: _temValor ? _laranja.withOpacity(0.4) : Colors.grey.shade300,
+                color: _temValor
+                    ? _laranja.withOpacity(0.4)
+                    : Colors.grey.shade300,
               ),
             ),
             child: loading
@@ -646,7 +745,9 @@ class _PickerField extends StatelessWidget {
                                   Text(
                                     nome!,
                                     style: const TextStyle(
-                                        fontSize: 13, color: Color(0xFF212121)),
+                                      fontSize: 13,
+                                      color: Color(0xFF212121),
+                                    ),
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 ],
@@ -654,16 +755,26 @@ class _PickerField extends StatelessWidget {
                             : Text(
                                 placeholder,
                                 style: TextStyle(
-                                    fontSize: 13, color: Colors.grey.shade400),
+                                  fontSize: 13,
+                                  color: Colors.grey.shade400,
+                                ),
                               ),
                       ),
                       if (_temValor)
                         GestureDetector(
                           onTap: onClear,
-                          child: Icon(Icons.close, size: 16, color: Colors.grey.shade400),
+                          child: Icon(
+                            Icons.close,
+                            size: 16,
+                            color: Colors.grey.shade400,
+                          ),
                         )
                       else
-                        Icon(Icons.chevron_right, size: 18, color: Colors.grey.shade400),
+                        Icon(
+                          Icons.chevron_right,
+                          size: 18,
+                          color: Colors.grey.shade400,
+                        ),
                     ],
                   ),
           ),
@@ -687,8 +798,11 @@ class _ClusterPickerDialogState extends State<_ClusterPickerDialog> {
   String _pesquisa = '';
 
   List<PricingClusterItem> get _filtrados => widget.clusters
-      .where((cl) => cl.name.toLowerCase().contains(_pesquisa.toLowerCase()) ||
-          cl.id.toLowerCase().contains(_pesquisa.toLowerCase()))
+      .where(
+        (cl) =>
+            cl.name.toLowerCase().contains(_pesquisa.toLowerCase()) ||
+            cl.id.toLowerCase().contains(_pesquisa.toLowerCase()),
+      )
       .toList();
 
   @override
@@ -717,21 +831,39 @@ class _ClusterPickerDialogState extends State<_ClusterPickerDialog> {
                       color: _laranja.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(Icons.account_tree_outlined, color: _laranja, size: 18),
+                    child: const Icon(
+                      Icons.account_tree_outlined,
+                      color: _laranja,
+                      size: 18,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Selecionar agrupamento',
-                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-                      Text('Grupos de materiais disponíveis',
-                          style: TextStyle(fontSize: 11, color: Color(0xFF9E9E9E))),
+                      Text(
+                        'Selecionar agrupamento',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Text(
+                        'Grupos de materiais disponíveis',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF9E9E9E),
+                        ),
+                      ),
                     ],
                   ),
                   const Spacer(),
                   IconButton(
-                    icon: const Icon(Icons.close, size: 18, color: Color(0xFF9E9E9E)),
+                    icon: const Icon(
+                      Icons.close,
+                      size: 18,
+                      color: Color(0xFF9E9E9E),
+                    ),
                     onPressed: () => Navigator.pop(context),
                   ),
                 ],
@@ -745,11 +877,21 @@ class _ClusterPickerDialogState extends State<_ClusterPickerDialog> {
                 autofocus: true,
                 decoration: InputDecoration(
                   hintText: 'Buscar agrupamento...',
-                  hintStyle: const TextStyle(fontSize: 13, color: Color(0xFFBDBDBD)),
-                  prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF9E9E9E)),
+                  hintStyle: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFFBDBDBD),
+                  ),
+                  prefixIcon: const Icon(
+                    Icons.search,
+                    size: 18,
+                    color: Color(0xFF9E9E9E),
+                  ),
                   filled: true,
                   fillColor: const Color(0xFFF8F8F8),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                     borderSide: const BorderSide(color: Color(0xFFE8E8E8)),
@@ -773,7 +915,10 @@ class _ClusterPickerDialogState extends State<_ClusterPickerDialog> {
                 alignment: Alignment.centerLeft,
                 child: Text(
                   '${filtrados.length} agrupamento${filtrados.length != 1 ? 's' : ''}',
-                  style: const TextStyle(fontSize: 11, color: Color(0xFF9E9E9E)),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFF9E9E9E),
+                  ),
                 ),
               ),
             ),
@@ -786,15 +931,27 @@ class _ClusterPickerDialogState extends State<_ClusterPickerDialog> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.search_off, size: 32, color: Colors.grey.shade300),
+                          Icon(
+                            Icons.search_off,
+                            size: 32,
+                            color: Colors.grey.shade300,
+                          ),
                           const SizedBox(height: 8),
-                          Text('Nenhum agrupamento encontrado',
-                              style: TextStyle(fontSize: 13, color: Colors.grey.shade400)),
+                          Text(
+                            'Nenhum agrupamento encontrado',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.grey.shade400,
+                            ),
+                          ),
                         ],
                       ),
                     )
                   : ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 4,
+                      ),
                       itemCount: filtrados.length,
                       itemBuilder: (_, i) {
                         final cl = filtrados[i];
@@ -803,7 +960,10 @@ class _ClusterPickerDialogState extends State<_ClusterPickerDialog> {
                           borderRadius: BorderRadius.circular(8),
                           child: Container(
                             margin: const EdgeInsets.symmetric(vertical: 2),
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(8),
                             ),
@@ -816,25 +976,40 @@ class _ClusterPickerDialogState extends State<_ClusterPickerDialog> {
                                     color: _laranja.withOpacity(0.08),
                                     borderRadius: BorderRadius.circular(6),
                                   ),
-                                  child: const Icon(Icons.account_tree_outlined,
-                                      size: 16, color: _laranja),
+                                  child: const Icon(
+                                    Icons.account_tree_outlined,
+                                    size: 16,
+                                    color: _laranja,
+                                  ),
                                 ),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      Text(cl.name,
-                                          style: const TextStyle(
-                                              fontSize: 13, fontWeight: FontWeight.w500)),
-                                      Text('ID: ${cl.id}',
-                                          style: const TextStyle(
-                                              fontSize: 10, color: Color(0xFF9E9E9E))),
+                                      Text(
+                                        cl.name,
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                      Text(
+                                        'ID: ${cl.id}',
+                                        style: const TextStyle(
+                                          fontSize: 10,
+                                          color: Color(0xFF9E9E9E),
+                                        ),
+                                      ),
                                     ],
                                   ),
                                 ),
-                                const Icon(Icons.chevron_right,
-                                    size: 16, color: Color(0xFFCCCCCC)),
+                                const Icon(
+                                  Icons.chevron_right,
+                                  size: 16,
+                                  color: Color(0xFFCCCCCC),
+                                ),
                               ],
                             ),
                           ),
@@ -863,9 +1038,11 @@ class _MaterialPickerDialogState extends State<_MaterialPickerDialog> {
   String _pesquisa = '';
 
   List<MaterialPreco> get _filtrados => widget.materiais
-      .where((m) =>
-          m.codigo.toLowerCase().contains(_pesquisa.toLowerCase()) ||
-          m.description.toLowerCase().contains(_pesquisa.toLowerCase()))
+      .where(
+        (m) =>
+            m.codigo.toLowerCase().contains(_pesquisa.toLowerCase()) ||
+            m.description.toLowerCase().contains(_pesquisa.toLowerCase()),
+      )
       .toList();
 
   @override
@@ -894,21 +1071,39 @@ class _MaterialPickerDialogState extends State<_MaterialPickerDialog> {
                       color: _laranja.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(Icons.inventory_2_outlined, color: _laranja, size: 18),
+                    child: const Icon(
+                      Icons.inventory_2_outlined,
+                      color: _laranja,
+                      size: 18,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Selecionar material',
-                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-                      Text('Materiais do agrupamento selecionado',
-                          style: TextStyle(fontSize: 11, color: Color(0xFF9E9E9E))),
+                      Text(
+                        'Selecionar material',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Text(
+                        'Materiais do agrupamento selecionado',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF9E9E9E),
+                        ),
+                      ),
                     ],
                   ),
                   const Spacer(),
                   IconButton(
-                    icon: const Icon(Icons.close, size: 18, color: Color(0xFF9E9E9E)),
+                    icon: const Icon(
+                      Icons.close,
+                      size: 18,
+                      color: Color(0xFF9E9E9E),
+                    ),
                     onPressed: () => Navigator.pop(context),
                   ),
                 ],
@@ -922,11 +1117,21 @@ class _MaterialPickerDialogState extends State<_MaterialPickerDialog> {
                 autofocus: true,
                 decoration: InputDecoration(
                   hintText: 'Buscar por código ou descrição...',
-                  hintStyle: const TextStyle(fontSize: 13, color: Color(0xFFBDBDBD)),
-                  prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF9E9E9E)),
+                  hintStyle: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFFBDBDBD),
+                  ),
+                  prefixIcon: const Icon(
+                    Icons.search,
+                    size: 18,
+                    color: Color(0xFF9E9E9E),
+                  ),
                   filled: true,
                   fillColor: const Color(0xFFF8F8F8),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                     borderSide: const BorderSide(color: Color(0xFFE8E8E8)),
@@ -950,7 +1155,10 @@ class _MaterialPickerDialogState extends State<_MaterialPickerDialog> {
                 alignment: Alignment.centerLeft,
                 child: Text(
                   '${filtrados.length} material${filtrados.length != 1 ? 'is' : ''}',
-                  style: const TextStyle(fontSize: 11, color: Color(0xFF9E9E9E)),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFF9E9E9E),
+                  ),
                 ),
               ),
             ),
@@ -963,15 +1171,27 @@ class _MaterialPickerDialogState extends State<_MaterialPickerDialog> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.search_off, size: 32, color: Colors.grey.shade300),
+                          Icon(
+                            Icons.search_off,
+                            size: 32,
+                            color: Colors.grey.shade300,
+                          ),
                           const SizedBox(height: 8),
-                          Text('Nenhum material encontrado',
-                              style: TextStyle(fontSize: 13, color: Colors.grey.shade400)),
+                          Text(
+                            'Nenhum material encontrado',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.grey.shade400,
+                            ),
+                          ),
                         ],
                       ),
                     )
                   : ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 4,
+                      ),
                       itemCount: filtrados.length,
                       itemBuilder: (_, i) {
                         final m = filtrados[i];
@@ -980,7 +1200,10 @@ class _MaterialPickerDialogState extends State<_MaterialPickerDialog> {
                           borderRadius: BorderRadius.circular(8),
                           child: Container(
                             margin: const EdgeInsets.symmetric(vertical: 2),
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(8),
                             ),
@@ -988,7 +1211,9 @@ class _MaterialPickerDialogState extends State<_MaterialPickerDialog> {
                               children: [
                                 Container(
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 6),
+                                    horizontal: 8,
+                                    vertical: 6,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: const Color(0xFFF0F0F0),
                                     borderRadius: BorderRadius.circular(6),
@@ -1010,8 +1235,11 @@ class _MaterialPickerDialogState extends State<_MaterialPickerDialog> {
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
-                                const Icon(Icons.chevron_right,
-                                    size: 16, color: Color(0xFFCCCCCC)),
+                                const Icon(
+                                  Icons.chevron_right,
+                                  size: 16,
+                                  color: Color(0xFFCCCCCC),
+                                ),
                               ],
                             ),
                           ),

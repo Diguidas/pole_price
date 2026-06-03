@@ -5,7 +5,8 @@ import 'package:pole_price/widgets/preco/painel_direito.dart';
 import 'package:pole_price/widgets/preco/preco_topbar.dart';
 
 class PrecoScreen extends StatefulWidget {
-  const PrecoScreen({super.key});
+  final String? draftId;
+  const PrecoScreen({super.key, this.draftId});
 
   @override
   State<PrecoScreen> createState() => _PrecoScreenState();
@@ -18,13 +19,15 @@ class _PrecoScreenState extends State<PrecoScreen> {
   void initState() {
     super.initState();
     controller = PrecoController.instance;
-    controller.iniciarNovaSessao(); // ← limpa sessão anterior
     controller.addListener(_rebuild);
 
-    // Parâmetros já foram configurados no controller pelo selecao_modo_dialog
-    // antes da navegação. Apenas dispara a busca.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      controller.buscarDoSap();
+      controller.iniciarNovaSessao();
+      if (widget.draftId != null) {
+        controller.carregarRascunho(widget.draftId!); // ← novo método
+      } else {
+        controller.buscarDoSap();
+      }
     });
   }
 
@@ -49,27 +52,27 @@ class _PrecoScreenState extends State<PrecoScreen> {
             child: controller.loading
                 ? const Center(child: CircularProgressIndicator())
                 : controller.erro != null && controller.materiais.isEmpty
-                    ? _ErroView(
-                        mensagem: controller.erro!,
-                        onRetry: controller.buscarDoSap,
-                      )
-                    : Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              flex: 3,
-                              child: PainelEsquerdo(controller: controller),
-                            ),
-                            const SizedBox(width: 20),
-                            Expanded(
-                              flex: 2,
-                              child: PainelDireito(controller: controller),
-                            ),
-                          ],
+                ? _ErroView(
+                    mensagem: controller.erro!,
+                    onRetry: controller.buscarDoSap,
+                  )
+                : Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: PainelEsquerdo(controller: controller),
                         ),
-                      ),
+                        const SizedBox(width: 20),
+                        Expanded(
+                          flex: 2,
+                          child: PainelDireito(controller: controller),
+                        ),
+                      ],
+                    ),
+                  ),
           ),
         ],
       ),

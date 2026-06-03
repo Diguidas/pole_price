@@ -7,6 +7,7 @@ import 'package:pole_price/screens/home_screen.dart';
 import 'package:pole_price/screens/preco_screen.dart';
 import 'package:pole_price/screens/grupos_screen.dart';
 import 'package:pole_price/screens/definir_aprovacoes_screen.dart';
+import 'package:pole_price/screens/rascunhos_screen.dart';
 import 'package:pole_price/screens/historico_screen.dart';
 import 'package:pole_price/screens/politicas_screen.dart';
 import 'package:pole_price/screens/relatorio_screen.dart';
@@ -19,6 +20,7 @@ enum AppPage {
   home,
   precos,
   grupos,
+  rascunhos,
   aprovacoes,
   historico,
   politicas,
@@ -29,6 +31,7 @@ enum AppPage {
     AppPage.home => 'Home',
     AppPage.precos => 'Preços',
     AppPage.grupos => 'Grupos',
+    AppPage.rascunhos => 'Meus Rascunhos',
     AppPage.aprovacoes => 'Aprovações',
     AppPage.historico => 'Histórico',
     AppPage.politicas => 'Políticas',
@@ -40,6 +43,7 @@ enum AppPage {
     AppPage.home => Icons.home_rounded,
     AppPage.precos => Icons.attach_money_rounded,
     AppPage.grupos => Icons.account_tree_rounded,
+    AppPage.rascunhos => Icons.folder_outlined,
     AppPage.aprovacoes => Icons.check_circle_rounded,
     AppPage.historico => Icons.history_rounded,
     AppPage.politicas => Icons.policy_rounded,
@@ -51,6 +55,7 @@ enum AppPage {
     AppPage.home => true,
     AppPage.precos => p.podeVerPrecos,
     AppPage.grupos => p.podeVerGrupos,
+    AppPage.rascunhos => p.podeVerRascunhos,
     AppPage.aprovacoes => p.podeVerAprovacoes,
     AppPage.historico => p.podeVerHistorico,
     AppPage.politicas => p.podeVerPoliticas,
@@ -96,13 +101,83 @@ class _AppShellState extends State<AppShell> {
 
   void goTo(AppPage page, {String? draftId}) {
     if (page == AppPage.precos) {
-      goToPrecos();
+      if (draftId != null) {
+        _goToPrecosComRascunho(draftId); // ← novo caminho
+      } else {
+        goToPrecos();
+      }
       return;
+    }
+    // Ao tentar ir para aprovações após salvar um draft pending:
+    // só deixa se tiver permissão (admin ou aprovador), senão volta p/ preços do zero.
+    if (page == AppPage.aprovacoes && draftId != null) {
+      final perm = PermissaoController.instance;
+      if (!perm.podeAprovar) {
+        // Sem permissão de aprovação: limpa sessão e vai para rascunhos (se puder) ou home
+        PrecoController.instance.iniciarNovaSessao();
+        setState(() {
+          _paginaAtiva = perm.podeVerRascunhos
+              ? AppPage.rascunhos
+              : AppPage.home;
+          _draftIdInicial = null;
+          _precoParams = null;
+        });
+        return;
+      }
     }
     if (_paginaAtiva == page && draftId == null) return;
     setState(() {
       _paginaAtiva = page;
       _draftIdInicial = draftId;
+    });
+  }
+
+  Future<void> _goToPrecosComRascunho(String draftId) async {
+    final ctrl = PrecoController.instance;
+
+    // Busca cabeçalho do draft (sem 'modo' — não existe nessa tabela)
+    final draft = await Supabase.instance.client
+        .from('price_drafts')
+        .select('master_list_id') // só isso
+        .eq('id', draftId)
+        .single();
+
+    // Busca modo e kdgrp do primeiro item
+    final primeiroItem = await Supabase.instance.client
+        .from('price_draft_items')
+        .select('modo, kdgrp')
+        .eq('draft_id', draftId)
+        .limit(1)
+        .maybeSingle();
+
+    final pltyp = draft['master_list_id']?.toString();
+    final modoStr = primeiroItem?['modo']?.toString();
+    final kdgrp = primeiroItem?['kdgrp']?.toString();
+
+    await ctrl.init();
+
+    ctrl.modo = modoStr == 'grupo' ? SapModo.grupo : SapModo.lista;
+    ctrl.pltyp = pltyp;
+    ctrl.kdgrp = kdgrp;
+    ctrl.selecionada = ctrl.listas.where((l) => l.id == pltyp).firstOrNull;
+    ctrl.materiais = [];
+    ctrl.filtrados = [];
+    ctrl.erro = null;
+
+    if (!mounted) return;
+
+    setState(() {
+      _draftIdInicial = draftId;
+      _precoParams = _PrecoParams(
+        modo: modoStr == 'grupo' ? SapModo.grupo : SapModo.lista,
+        pltyp: pltyp ?? '',
+        kdgrp: kdgrp,
+        datab: null,
+        datbi: null,
+        databOp: null,
+        datbiOp: null,
+      );
+      _paginaAtiva = AppPage.precos;
     });
   }
 
@@ -162,8 +237,19 @@ class _AppShellState extends State<AppShell> {
     return switch (page) {
       AppPage.home => const HomeScreen(),
       AppPage.precos =>
-        _precoParams != null ? const PrecoScreen() : const SizedBox.shrink(),
+        _precoParams != null
+            ? PrecoScreen(
+                key: ValueKey(
+                  _draftIdInicial ??
+                      '${_precoParams!.pltyp}_'
+                          '${_precoParams!.kdgrp}_'
+                          '${_precoParams!.datab?.millisecondsSinceEpoch}',
+                ),
+                draftId: _draftIdInicial, // ← passar aqui
+              )
+            : const SizedBox.shrink(),
       AppPage.grupos => const GruposScreen(),
+      AppPage.rascunhos => const RascunhosScreen(),
       AppPage.aprovacoes => AprovacoesScreen(draftIdInicial: _draftIdInicial),
       AppPage.historico => const HistoricoScreen(),
       AppPage.politicas => const PoliticasScreen(),
@@ -194,6 +280,7 @@ class _AppSidebarState extends State<_AppSidebar> {
     AppPage.home,
     AppPage.precos,
     AppPage.grupos,
+    AppPage.rascunhos,
     AppPage.aprovacoes,
     AppPage.historico,
     AppPage.politicas,
@@ -254,7 +341,7 @@ class _AppSidebarState extends State<_AppSidebar> {
                                 'assets/logo_branca.png',
                                 height: 200,
                                 alignment: Alignment.centerLeft,
-                                
+
                                 errorBuilder: (_, __, ___) => const Text(
                                   'Pole Price',
                                   style: TextStyle(
@@ -622,7 +709,8 @@ class _ModoPrecoDialogState extends State<_ModoPrecoDialog> {
                       icon: Icons.list_alt_rounded,
                       onTap: () async {
                         final ref = await showListaPicker(context);
-                        if (ref != null) setState(() => _pltypSelecionado = ref.pltyp);
+                        if (ref != null)
+                          setState(() => _pltypSelecionado = ref.pltyp);
                       },
                     ),
 
@@ -641,7 +729,8 @@ class _ModoPrecoDialogState extends State<_ModoPrecoDialog> {
                         icon: Icons.account_tree_rounded,
                         onTap: () async {
                           final ref = await showGrupoPicker(context);
-                          if (ref != null) setState(() => _kdgrpSelecionado = ref.kdgrp);
+                          if (ref != null)
+                            setState(() => _kdgrpSelecionado = ref.kdgrp);
                         },
                       ),
               ],
@@ -918,7 +1007,11 @@ class _ModoPrecoDialogState extends State<_ModoPrecoDialog> {
       ),
       child: Row(
         children: [
-          Icon(icon, size: 16, color: value != null ? _corLaranja : _corSubtexto),
+          Icon(
+            icon,
+            size: 16,
+            color: value != null ? _corLaranja : _corSubtexto,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -931,7 +1024,11 @@ class _ModoPrecoDialogState extends State<_ModoPrecoDialog> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          Icon(Icons.expand_more_rounded, size: 18, color: value != null ? _corLaranja : _corSubtexto),
+          Icon(
+            Icons.expand_more_rounded,
+            size: 18,
+            color: value != null ? _corLaranja : _corSubtexto,
+          ),
         ],
       ),
     ),

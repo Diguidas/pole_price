@@ -116,7 +116,7 @@ class _PainelEsquerdoState extends State<PainelEsquerdo> {
           ),
 
           Expanded(
-            child: TabelaPrecos(controller: c, scrollController: _scrollCtrl),
+            child: TabelaPrecos(controller: c),
           ),
 
           if (c.pltyp != null)

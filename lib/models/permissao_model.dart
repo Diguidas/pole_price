@@ -56,6 +56,7 @@ class UsuarioPermissao {
 
   // Acesso a telas
   bool get podeVerPrecos => isAdmin || isGestor;
+  bool get podeVerRascunhos => isAdmin || isGestor;
   bool get podeVerAprovacoes => isAdmin || isAprovador;
   bool get podeVerGrupos => isAdmin || isGestor;
   bool get podeVerPoliticas => isAdmin;

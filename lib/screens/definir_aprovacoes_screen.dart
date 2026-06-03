@@ -32,6 +32,8 @@ class _AprovacoesScreenState extends State<AprovacoesScreen> {
 
   List<Map<String, dynamic>> _materiais = [];
   String _detalheCabecalho = '';
+  String _datab = '';
+  String _datbi = '';
   String _filtroTab = 'todos';
   String _busca = '';
   final Set<String> _listasExpandidas = {};
@@ -50,7 +52,7 @@ class _AprovacoesScreenState extends State<AprovacoesScreen> {
     try {
       final response = await Supabase.instance.client
           .from('price_drafts')
-          .select('id, status, created_at, master_list_id, created_by_email')
+          .select('id, status, created_at, master_list_id, created_by_email, justificativa')
           .eq('status', 'pending')
           .order('created_at', ascending: false);
 
@@ -105,15 +107,27 @@ class _AprovacoesScreenState extends State<AprovacoesScreen> {
       _rascunhoSelecionado = draft;
       _materiais.clear();
       _detalheCabecalho = '';
+      _datab = '';
+      _datbi = '';
       _listasExpandidas.clear();
       _filtroTab = 'todos';
       _busca = '';
     });
     try {
       final preview = await _draftService.buildPreview(draft.id);
+
+      final vigRow = await Supabase.instance.client
+          .from('price_draft_items')
+          .select('datab, datbi')
+          .eq('draft_id', draft.id)
+          .limit(1)
+          .maybeSingle();
+
       setState(() {
         _materiais = preview.materiais.map((m) => m.toRowMap()).toList();
         _detalheCabecalho = preview.resumo;
+        _datab = vigRow?['datab']?.toString() ?? '';
+        _datbi = vigRow?['datbi']?.toString() ?? '';
       });
     } catch (e) {
       _snack('Erro ao carregar detalhes: $e', Colors.red);
@@ -192,6 +206,8 @@ class _AprovacoesScreenState extends State<AprovacoesScreen> {
     _rascunhoSelecionado = null;
     _materiais.clear();
     _detalheCabecalho = '';
+    _datab = '';
+    _datbi = '';
     _listasExpandidas.clear();
   });
 
@@ -285,6 +301,8 @@ class _AprovacoesScreenState extends State<AprovacoesScreen> {
                     draft: _rascunhoSelecionado!,
                     materiais: _materiais,
                     detalheCabecalho: _detalheCabecalho,
+                    datab: _datab,
+                    datbi: _datbi,
                     filtroTab: _filtroTab,
                     busca: _busca,
                     listasExpandidas: _listasExpandidas,
@@ -412,6 +430,11 @@ class _DraftCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Extrai só o nome da parte local do email (antes do @)
+    final nomeExibicao = draft.createdByEmail != null && draft.createdByEmail!.isNotEmpty
+        ? draft.createdByEmail!.split('@').first
+        : 'Desconhecido';
+
     return Material(
       color: selected ? _laranja.withOpacity(0.06) : Colors.transparent,
       child: InkWell(
@@ -430,23 +453,24 @@ class _DraftCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      draft.masterListName,
+                      nomeExibicao,
                       style: TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 13,
                         color: selected ? _laranja : Colors.grey.shade900,
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    // Mostra quem criou (email)
-                    if (draft.createdByEmail != null &&
-                        draft.createdByEmail!.isNotEmpty)
+                    const SizedBox(height: 4),
+                    if (draft.justificativa != null &&
+                        draft.justificativa!.isNotEmpty)
                       Text(
-                        draft.createdByEmail!,
+                        draft.justificativa!,
                         style: TextStyle(
                           fontSize: 11,
-                          color: Colors.grey.shade500,
+                          color: Colors.grey.shade600,
+                          fontStyle: FontStyle.italic,
                         ),
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
                     const SizedBox(height: 2),
@@ -519,6 +543,8 @@ class _PainelDetalhes extends StatelessWidget {
   final DraftAprovacao draft;
   final List<Map<String, dynamic>> materiais;
   final String detalheCabecalho;
+  final String datab;
+  final String datbi;
   final String filtroTab;
   final String busca;
   final Set<String> listasExpandidas;
@@ -539,6 +565,8 @@ class _PainelDetalhes extends StatelessWidget {
     required this.draft,
     required this.materiais,
     required this.detalheCabecalho,
+    required this.datab,
+    required this.datbi,
     required this.filtroTab,
     required this.busca,
     required this.listasExpandidas,
@@ -562,6 +590,8 @@ class _PainelDetalhes extends StatelessWidget {
       children: [
         _Cabecalho(
           draft: draft,
+          datab: datab,
+          datbi: datbi,
           aprovando: aprovando,
           podeAprovar: podeAprovar,
           onAprovar: onAprovar,
@@ -614,6 +644,8 @@ class _PainelDetalhes extends StatelessWidget {
 class _Cabecalho extends StatelessWidget {
   static const _laranja = Color(0xFFFF6B00);
   final DraftAprovacao draft;
+  final String datab;
+  final String datbi;
   final bool aprovando;
   final bool podeAprovar;
   final VoidCallback onAprovar;
@@ -621,6 +653,8 @@ class _Cabecalho extends StatelessWidget {
 
   const _Cabecalho({
     required this.draft,
+    required this.datab,
+    required this.datbi,
     required this.aprovando,
     required this.podeAprovar,
     required this.onAprovar,
@@ -629,6 +663,23 @@ class _Cabecalho extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Formata datas de vigência
+    String _fmtData(String? raw) {
+      if (raw == null || raw.isEmpty) return '—';
+      // Suporta formato ISO (yyyy-mm-dd) e SAP (yyyymmdd)
+      String s = raw.replaceAll('-', '');
+      if (s.length == 8) {
+        return '${s.substring(6, 8)}/${s.substring(4, 6)}/${s.substring(0, 4)}';
+      }
+      if (raw.length >= 10) {
+        final parts = raw.substring(0, 10).split('-');
+        if (parts.length == 3) return '${parts[2]}/${parts[1]}/${parts[0]}';
+      }
+      return raw;
+    }
+
+    final temVigencia = datab.isNotEmpty || datbi.isNotEmpty;
+
     return Container(
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
       color: Colors.white,
@@ -644,7 +695,7 @@ class _Cabecalho extends StatelessWidget {
               ),
               Icon(Icons.chevron_right, size: 16, color: Colors.grey.shade400),
               Text(
-                draft.masterListName,
+                'Revisão de rascunho',
                 style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
               ),
             ],
@@ -657,25 +708,20 @@ class _Cabecalho extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Aprovação de preços: ${draft.masterListName}',
-                      style: const TextStyle(
+                    const Text(
+                      'Aprovação de preços',
+                      style: TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 6),
                     // Criado por + data
                     Wrap(
                       spacing: 16,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Text(
-                          'Criado em ${draft.createdAtFormatado}',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey.shade600,
-                          ),
-                        ),
                         if (draft.createdByEmail != null &&
                             draft.createdByEmail!.isNotEmpty)
                           Row(
@@ -696,8 +742,44 @@ class _Cabecalho extends StatelessWidget {
                               ),
                             ],
                           ),
+                        Text(
+                          'Criado em ${draft.createdAtFormatado}',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey.shade500,
+                          ),
+                        ),
                       ],
                     ),
+                    // Vigência em destaque
+                    if (temVigencia) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: _laranja.withOpacity(0.06),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: _laranja.withOpacity(0.25)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.date_range,
+                                size: 15, color: _laranja),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Vigência: ${_fmtData(datab)} → ${_fmtData(datbi)}',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: _laranja,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1468,5 +1550,3 @@ extension _DraftFormat on DraftAprovacao {
     return createdAt;
   }
 }
-
-

@@ -64,7 +64,6 @@ class MaterialPreco {
   });
 
   factory MaterialPreco.fromJson(Map<String, dynamic> json) {
-    print('DEBUG vigência: datab=${json['datab']} datbi=${json['datbi']}');
     return MaterialPreco(
       codigo: json['product_id'] ?? '',
       description: json['description'] ?? '',

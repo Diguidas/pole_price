@@ -43,7 +43,8 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
           .from('price_drafts')
           .select(
             'id, status, created_at, created_by_email, '
-            'reviewed_by_email, reviewed_at, master_list_id',
+            'reviewed_by_email, reviewed_at, master_list_id, '
+            'justificativa, vigencia_datab, vigencia_datbi',
           )
           .order('created_at', ascending: false);
 
@@ -169,6 +170,9 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
           reviewedByEmail: reviewedByEmail,
           createdAt: createdAt,
           reviewedAt: reviewedAt,
+          justificativa: r['justificativa']?.toString(),
+          vigenciaDatab: r['vigencia_datab']?.toString(),
+          vigenciaDatbi: r['vigencia_datbi']?.toString(),
         ),
       ),
     );

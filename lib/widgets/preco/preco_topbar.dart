@@ -102,6 +102,11 @@ class PrecoTopbar extends StatelessWidget {
 
           const SizedBox(width: 12),
 
+          // ── Botão Salvar rascunho ───────────────────────────────────
+          _SalvarRascunhoButton(controller: controller),
+
+          const SizedBox(width: 8),
+
           // ── Botão Salvar para aprovação ─────────────────────────────
           ElevatedButton.icon(
             icon: const Icon(Icons.check_circle_outline, size: 18),
@@ -182,6 +187,88 @@ class PrecoTopbar extends StatelessWidget {
   }
 }
 
+// ── Botão Salvar rascunho ─────────────────────────────────────────────────────
+class _SalvarRascunhoButton extends StatefulWidget {
+  final PrecoController controller;
+  const _SalvarRascunhoButton({required this.controller});
+
+  @override
+  State<_SalvarRascunhoButton> createState() => _SalvarRascunhoButtonState();
+}
+
+class _SalvarRascunhoButtonState extends State<_SalvarRascunhoButton> {
+  bool _salvando = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final temDados = widget.controller.materiais.isNotEmpty;
+
+    return OutlinedButton.icon(
+      icon: _salvando
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2, color: _laranja),
+            )
+          : const Icon(Icons.save_outlined, size: 18, color: _laranja),
+      label: Text(
+        _salvando ? 'Salvando...' : 'Salvar rascunho',
+        style: const TextStyle(fontSize: 13, color: _laranja),
+      ),
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        side: const BorderSide(color: _laranja),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+      onPressed: (!temDados || _salvando)
+          ? null
+          : () async {
+              if (widget.controller.vigenciaGlobalDatab == null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Informe a vigência global antes de salvar.'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return;
+              }
+              if (widget.controller.selecionada == null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Lista mãe não identificada.')),
+                );
+                return;
+              }
+              setState(() => _salvando = true);
+              try {
+                final draftId = await widget.controller.salvarRascunho();
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Rascunho salvo!'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                  AppShell.of(
+                    context,
+                  ).goTo(AppPage.rascunhos); // ← ir para rascunhos
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Erro ao salvar rascunho: $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              } finally {
+                if (mounted) setState(() => _salvando = false);
+              }
+            },
+    );
+  }
+}
+
 // ── Botão Query unificado ─────────────────────────────────────────────────────
 class _QueryButton extends StatelessWidget {
   final PrecoController controller;
@@ -212,9 +299,16 @@ class _QueryButton extends StatelessWidget {
               ? const SizedBox(
                   width: 16,
                   height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: _laranja),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: _laranja,
+                  ),
                 )
-              : Icon(Icons.tune, size: 18, color: _temFiltros ? _laranja : Colors.grey.shade600),
+              : Icon(
+                  Icons.tune,
+                  size: 18,
+                  color: _temFiltros ? _laranja : Colors.grey.shade600,
+                ),
           label: Text(
             controller.loading ? 'Buscando...' : 'Query',
             style: TextStyle(
@@ -225,8 +319,12 @@ class _QueryButton extends StatelessWidget {
           ),
           style: OutlinedButton.styleFrom(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            side: BorderSide(color: _temFiltros ? _laranja : Colors.grey.shade300),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            side: BorderSide(
+              color: _temFiltros ? _laranja : Colors.grey.shade300,
+            ),
           ),
           onPressed: controller.loading
               ? null
@@ -247,13 +345,19 @@ class _QueryButton extends StatelessWidget {
                     await controller.buscarDoSap();
                     if (context.mounted && controller.erro != null) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(controller.erro!), backgroundColor: Colors.red),
+                        SnackBar(
+                          content: Text(controller.erro!),
+                          backgroundColor: Colors.red,
+                        ),
                       );
                     }
                   } catch (e) {
                     if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Erro ao buscar do SAP: $e'), backgroundColor: Colors.red),
+                        SnackBar(
+                          content: Text('Erro ao buscar do SAP: $e'),
+                          backgroundColor: Colors.red,
+                        ),
                       );
                     }
                   }
@@ -265,10 +369,17 @@ class _QueryButton extends StatelessWidget {
             right: -6,
             child: Container(
               padding: const EdgeInsets.all(4),
-              decoration: const BoxDecoration(color: _laranja, shape: BoxShape.circle),
+              decoration: const BoxDecoration(
+                color: _laranja,
+                shape: BoxShape.circle,
+              ),
               child: Text(
                 '$_contFiltros',
-                style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.w700),
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ),
@@ -395,37 +506,45 @@ class _QueryFilterDialogState extends State<_QueryFilterDialog> {
   }
 
   InputDecoration _inputDec(String hint, String? erro) => InputDecoration(
-        hintText: hint,
-        hintStyle: TextStyle(color: Colors.grey.shade400, letterSpacing: 0),
-        errorText: erro,
-        prefixIcon: const Icon(Icons.edit_calendar_outlined, size: 18, color: _laranja),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: Colors.grey.shade300),
-        ),
-        focusedBorder: const OutlineInputBorder(
-          borderRadius: BorderRadius.all(Radius.circular(8)),
-          borderSide: BorderSide(color: _laranja, width: 1.5),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: Colors.red.shade300),
-        ),
-        focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: Colors.red.shade400, width: 1.5),
-        ),
-        isDense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-      );
+    hintText: hint,
+    hintStyle: TextStyle(color: Colors.grey.shade400, letterSpacing: 0),
+    errorText: erro,
+    prefixIcon: const Icon(
+      Icons.edit_calendar_outlined,
+      size: 18,
+      color: _laranja,
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: BorderSide(color: Colors.grey.shade300),
+    ),
+    focusedBorder: const OutlineInputBorder(
+      borderRadius: BorderRadius.all(Radius.circular(8)),
+      borderSide: BorderSide(color: _laranja, width: 1.5),
+    ),
+    errorBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: BorderSide(color: Colors.red.shade300),
+    ),
+    focusedErrorBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: BorderSide(color: Colors.red.shade400, width: 1.5),
+    ),
+    isDense: true,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+  );
 
   Widget _sectionTitle(String text) => Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: Text(
-          text,
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF475569)),
-        ),
-      );
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Text(
+      text,
+      style: const TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+        color: Color(0xFF475569),
+      ),
+    ),
+  );
 
   Widget _opSelector(String current, ValueChanged<String> onSelect) {
     return Wrap(
@@ -448,15 +567,21 @@ class _QueryFilterDialogState extends State<_QueryFilterDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(symbol,
-                    style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                        color: sel ? Colors.white : Colors.grey.shade700)),
-                Text(desc,
-                    style: TextStyle(
-                        fontSize: 9,
-                        color: sel ? Colors.white70 : Colors.grey.shade500)),
+                Text(
+                  symbol,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: sel ? Colors.white : Colors.grey.shade700,
+                  ),
+                ),
+                Text(
+                  desc,
+                  style: TextStyle(
+                    fontSize: 9,
+                    color: sel ? Colors.white70 : Colors.grey.shade500,
+                  ),
+                ),
               ],
             ),
           ),
@@ -493,23 +618,37 @@ class _QueryFilterDialogState extends State<_QueryFilterDialog> {
               decoration: BoxDecoration(
                 color: sel ? _laranja.withOpacity(0.07) : Colors.grey.shade50,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: sel ? _laranja : Colors.grey.shade200),
+                border: Border.all(
+                  color: sel ? _laranja : Colors.grey.shade200,
+                ),
               ),
               child: Row(
                 children: [
-                  Icon(ic, size: 16, color: sel ? _laranja : Colors.grey.shade500),
+                  Icon(
+                    ic,
+                    size: 16,
+                    color: sel ? _laranja : Colors.grey.shade500,
+                  ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(lbl,
-                            style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: sel ? _laranja : Colors.grey.shade800)),
-                        Text(sub,
-                            style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+                        Text(
+                          lbl,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: sel ? _laranja : Colors.grey.shade800,
+                          ),
+                        ),
+                        Text(
+                          sub,
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.grey.shade500,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -542,11 +681,17 @@ class _QueryFilterDialogState extends State<_QueryFilterDialog> {
                 children: [
                   const Icon(Icons.tune, size: 18, color: _laranja),
                   const SizedBox(width: 10),
-                  const Text('Filtros da consulta SAP',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                  const Text(
+                    'Filtros da consulta SAP',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                  ),
                   const Spacer(),
                   IconButton(
-                    icon: Icon(Icons.close, size: 18, color: Colors.grey.shade500),
+                    icon: Icon(
+                      Icons.close,
+                      size: 18,
+                      color: Colors.grey.shade500,
+                    ),
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
                     onPressed: () => Navigator.pop(context),
@@ -572,9 +717,13 @@ class _QueryFilterDialogState extends State<_QueryFilterDialog> {
                       keyboardType: TextInputType.number,
                       inputFormatters: [_DateMaskFormatter()],
                       style: const TextStyle(fontSize: 14, letterSpacing: 1),
-                      decoration: _inputDec('DD/MM/AAAA (opcional)', _erroDatab),
+                      decoration: _inputDec(
+                        'DD/MM/AAAA (opcional)',
+                        _erroDatab,
+                      ),
                       onChanged: (_) {
-                        if (_erroDatab != null) setState(() => _erroDatab = null);
+                        if (_erroDatab != null)
+                          setState(() => _erroDatab = null);
                       },
                     ),
 
@@ -591,9 +740,13 @@ class _QueryFilterDialogState extends State<_QueryFilterDialog> {
                       keyboardType: TextInputType.number,
                       inputFormatters: [_DateMaskFormatter()],
                       style: const TextStyle(fontSize: 14, letterSpacing: 1),
-                      decoration: _inputDec('DD/MM/AAAA (opcional)', _erroDatbi),
+                      decoration: _inputDec(
+                        'DD/MM/AAAA (opcional)',
+                        _erroDatbi,
+                      ),
                       onChanged: (_) {
-                        if (_erroDatbi != null) setState(() => _erroDatbi = null);
+                        if (_erroDatbi != null)
+                          setState(() => _erroDatbi = null);
                       },
                     ),
 
@@ -650,22 +803,45 @@ class _QueryFilterDialogState extends State<_QueryFilterDialog> {
                         _erroDatbi = null;
                       });
                     },
-                    child: Text('Limpar tudo', style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+                    child: Text(
+                      'Limpar tudo',
+                      style: TextStyle(
+                        color: Colors.grey.shade500,
+                        fontSize: 13,
+                      ),
+                    ),
                   ),
                   const Spacer(),
                   TextButton(
                     onPressed: () => Navigator.pop(context),
-                    child: Text('Cancelar', style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+                    child: Text(
+                      'Cancelar',
+                      style: TextStyle(
+                        color: Colors.grey.shade600,
+                        fontSize: 13,
+                      ),
+                    ),
                   ),
                   const SizedBox(width: 8),
                   ElevatedButton.icon(
                     icon: const Icon(Icons.sync, size: 16),
-                    label: const Text('Buscar do SAP', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                    label: const Text(
+                      'Buscar do SAP',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _laranja,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 12,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                       elevation: 0,
                     ),
                     onPressed: _confirmar,

@@ -29,13 +29,9 @@ class _AuthGuardState extends State<AuthGuard> {
   }
 
   Future<void> _carregar() async {
-    print('=== AuthGuard: iniciando carregamento ===');
     final ctrl = PermissaoController.instance;
     ctrl.addListener(_onPermissaoChanged);
     await ctrl.init();
-    print('=== AuthGuard: carregamento finalizado ===');
-    print('=== erro: ${ctrl.erro} ===');
-    print('=== permissao: ${ctrl.permissao} ===');
   }
 
   void _onPermissaoChanged() {

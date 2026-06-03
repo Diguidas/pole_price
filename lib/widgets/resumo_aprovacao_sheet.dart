@@ -299,23 +299,23 @@ class _ResumoDraftSheetState extends State<_ResumoDraftSheet> {
   Widget _sapStatusPicker() {
     final opcoes = [
       _SapStatusOpcao(
-        valor: '',
+        valor: 'L',
         label: 'Ativo / Normal',
         descricao: 'Preço publicado e disponível para uso imediato.',
         icon: Icons.check_circle_outline,
         cor: Colors.green.shade600,
       ),
       _SapStatusOpcao(
-        valor: 'L',
-        label: 'Bloqueado p/ liberação',
-        descricao: 'Preço salvo mas aguarda liberação adicional no SAP.',
+        valor: '',
+        label: 'Respeitar o atual status no SAP',
+        descricao: 'Preço será salvo com o mesmo status que já possui no SAP (bloqueado ou ativo).',
         icon: Icons.lock_outline,
         cor: Colors.orange.shade700,
       ),
       _SapStatusOpcao(
         valor: 'X',
-        label: 'Deletado',
-        descricao: 'Marca o registro como deletado na lista SAP.',
+        label: 'Inativo',
+        descricao: 'Marca o registro como inativo na lista SAP.',
         icon: Icons.delete_outline,
         cor: Colors.red.shade600,
       ),

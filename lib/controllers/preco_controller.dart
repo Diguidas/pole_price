@@ -11,6 +11,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 enum SapModo { lista, grupo }
 
 class PrecoController extends ChangeNotifier {
+  String? draftIdAtivo; // id do rascunho em edição
   // ── Singleton por sessão ─────────────────────────────────────────────
   static PrecoController? _instance;
 
@@ -31,27 +32,11 @@ class PrecoController extends ChangeNotifier {
 
   @override
   void dispose() {
-    tableScrollController.dispose();
     _debounceTimer?.cancel();
     super.dispose();
   }
 
   final PriceService service;
-
-  // ── Scroll ────────────────────────────────────────────────────────────
-  /// ScrollController compartilhado com o ListView de TabelaPrecos.
-  /// Criado aqui (lazy) para sobreviver rebuilds do widget.
-  final ScrollController tableScrollController = ScrollController();
-
-  void scrollToTop() {
-    if (tableScrollController.hasClients) {
-      tableScrollController.animateTo(
-        0,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
-    }
-  }
 
   // ── Estado principal ─────────────────────────────────────────────────
   List<PriceList> listas = [];
@@ -244,7 +229,6 @@ class PrecoController extends ChangeNotifier {
     try {
       final databStr = _formatDate(datab);
       final datbiStr = _formatDate(datbi);
-
       final kznepP = _kznepSapParams();
       final loevmP = _loevmSapParams();
 
@@ -275,7 +259,55 @@ class PrecoController extends ChangeNotifier {
         );
       }
 
-      if (materiais.isNotEmpty) filtrados = _aplicarFiltrosLocais(materiais);
+      if (materiais.isNotEmpty) {
+        // Enriquece com clusterId da tabela products
+        try {
+          final codigos = materiais.map((m) => m.codigo).toList();
+          final prodRes =
+              await service.supabase
+                      .from('products')
+                      .select('code, pricing_cluster_id')
+                      .inFilter('code', codigos)
+                  as List;
+
+          final Map<String, String> clusterMap = {};
+          for (final p in prodRes) {
+            final code = p['code']?.toString();
+            final cid = p['pricing_cluster_id']?.toString();
+            if (code != null && cid != null) clusterMap[code] = cid;
+          }
+
+          materiais = materiais
+              .map(
+                (m) => MaterialPreco(
+                  codigo: m.codigo,
+                  description: m.description,
+                  precoAtual: m.precoAtual,
+                  novoPreco: m.novoPreco,
+                  cpv: m.cpv,
+                  margemFlat: m.margemFlat,
+                  margemOferta: m.margemOferta,
+                  clusterId: clusterMap[m.codigo],
+                  datab: m.datab,
+                  datbi: m.datbi,
+                  kgSug: m.kgSug,
+                  konwa: m.konwa,
+                  kmein: m.kmein,
+                  krech: m.krech,
+                  mxwrt: m.mxwrt,
+                  sapStatus: m.sapStatus,
+                  origemMaterial: m.origemMaterial,
+                  bloqueado: m.bloqueado,
+                  inativo: m.inativo,
+                ),
+              )
+              .toList();
+        } catch (_) {
+          // Falha no enriquecimento não bloqueia a tela
+        }
+
+        filtrados = _aplicarFiltrosLocais(materiais);
+      }
     } catch (e) {
       erro = 'Erro ao buscar do SAP: $e';
       materiais = [];
@@ -289,8 +321,12 @@ class PrecoController extends ChangeNotifier {
   /// Remove um material da sessão de edição (apenas local, não afeta o SAP).
   void removerMaterial(MaterialPreco m) {
     m.removido = true;
-    filtrados = materiais.where((m) => !m.removido).toList();
-    notifyListeners();
+    // Adia o rebuild para o próximo microtask — o botão de delete responde
+    // imediatamente ao toque, sem travar enquanto a lista é reconstruída.
+    Future.microtask(() {
+      filtrados = materiais.where((mat) => !mat.removido).toList();
+      notifyListeners();
+    });
   }
 
   /// Adiciona um material buscado manualmente (origem = manual).
@@ -307,8 +343,10 @@ class PrecoController extends ChangeNotifier {
       materiais.remove(m);
       materiais.insert(0, m);
       filtrados = _aplicarFiltrosLocais(materiais);
+      notifyListeners(); // só notifica quando há reordenação real
     }
-    notifyListeners();
+    // Sem promover: o _ItemMaterial já gerencia sua própria UI via setState —
+    // não precisa reconstruir a tela inteira a cada blur/onChange.
   }
 
   void atualizarVigencia(MaterialPreco m, String? datab, String? datbi) {
@@ -336,7 +374,8 @@ class PrecoController extends ChangeNotifier {
   }
 
   /// Limpa os dados de edição da sessão anterior sem destruir o singleton.
-  void iniciarNovaSessao({PriceList? listaMae}) {
+  /*   void iniciarNovaSessao({PriceList? listaMae}) {
+    draftIdAtivo = null;
     materiais = [];
     filtrados = [];
     targets = [];
@@ -347,6 +386,27 @@ class PrecoController extends ChangeNotifier {
     vigenciaGlobalDatab = null;
     vigenciaGlobalDatbi = null;
     erro = null;
+    notifyListeners();
+  } */
+
+  void iniciarNovaSessao({PriceList? listaMae}) {
+    materiais = [];
+    filtrados = [];
+    targets = [];
+    regras = [];
+    selecionada = listaMae ?? selecionada;
+    vigenciaGlobalDatab = null;
+    vigenciaGlobalDatbi = null;
+    erro = null;
+    draftIdAtivo = null; // ← adicionar
+    // Zera parâmetros SAP para não vazar sessão anterior
+    pltyp = null; // ← adicionar
+    kdgrp = null; // ← adicionar
+    datab = null; // ← adicionar
+    datbi = null; // ← adicionar
+    databOp = null; // ← adicionar
+    datbiOp = null; // ← adicionar
+    modo = SapModo.lista; // ← adicionar
     notifyListeners();
   }
 
@@ -364,8 +424,226 @@ class PrecoController extends ChangeNotifier {
       vigenciaDatbi: _toSapDate(vigenciaGlobalDatbi),
       justificativa: justificativa,
       sapStatus: sapStatus,
+      draftStatus: 'pending',
     );
   }
+
+  /// Salva como rascunho (status = 'draft'), sem enviar para aprovação.
+  /// Retorna o id do draft criado.
+  Future<String> salvarRascunho() async {
+    final id = await service.saveDraft(
+      draftId: draftIdAtivo,
+      masterListId: selecionada?.id,
+      materiais: materiais.where((m) => !m.removido).toList(),
+      targets: targets,
+      regras: regras,
+      modo: modo == SapModo.grupo ? 'grupo' : 'lista',
+      kdgrp: kdgrp,
+      vigenciaDatab: _toSapDate(vigenciaGlobalDatab),
+      vigenciaDatbi: _toSapDate(vigenciaGlobalDatbi),
+      justificativa: null,
+      sapStatus: '',
+      draftStatus: 'draft',
+    );
+    draftIdAtivo = id; // ← agora executa antes do return
+    return id;
+  }
+
+  Future<void> carregarRascunho(String draftId) async {
+    draftIdAtivo = draftId;
+    loading = true;
+    erro = null;
+    notifyListeners();
+
+    try {
+      // 1. Cabeçalho do draft (apenas colunas que existem)
+      final draft = await service.supabase
+          .from('price_drafts')
+          .select(
+            'master_list_id, vigencia_datab, vigencia_datbi, justificativa',
+          )
+          .eq('id', draftId)
+          .single();
+
+      pltyp = draft['master_list_id']?.toString();
+
+      // Restaura vigência global (formato SAP YYYYMMDD → DD/MM/AAAA para o controller)
+      vigenciaGlobalDatab = _fromSapDate(draft['vigencia_datab']?.toString());
+      vigenciaGlobalDatbi = _fromSapDate(draft['vigencia_datbi']?.toString());
+
+      // 2. Busca as 3 tabelas filhas + metadados do primeiro item em paralelo
+      final results = await Future.wait([
+        service.supabase
+            .from('price_draft_items')
+            .select()
+            .eq('draft_id', draftId),
+        service.supabase
+            .from('price_draft_targets')
+            .select('target_list_id')
+            .eq('draft_id', draftId),
+        service.supabase
+            .from('price_draft_exceptions')
+            .select()
+            .eq('draft_id', draftId),
+      ]);
+
+      final itens = results[0] as List;
+      final targetRes = results[1] as List;
+      final excRes = results[2] as List;
+
+      // 3. Modo e kdgrp vêm dos itens
+      final primeiroItem = itens.isNotEmpty ? itens.first : null;
+      modo = primeiroItem?['modo'] == 'grupo' ? SapModo.grupo : SapModo.lista;
+      kdgrp = primeiroItem?['kdgrp']?.toString();
+
+      // 4. Targets
+      targets = targetRes
+          .map((r) => r['target_list_id']?.toString())
+          .whereType<String>()
+          .toList();
+
+      // 5. Descriptions dos materiais via materials (tem description direto)
+      final codigos = itens
+          .map((r) => r['product_id']?.toString())
+          .whereType<String>()
+          .toList();
+
+      final Map<String, String> descMap = {};
+      if (codigos.isNotEmpty && pltyp != null) {
+        final matsRes = await service.supabase
+            .from('materials')
+            .select('product_id, description')
+            .eq('price_list_id', pltyp!)
+            .inFilter('product_id', codigos);
+        for (final m in matsRes as List) {
+          descMap[m['product_id'].toString()] =
+              m['description']?.toString() ?? '';
+        }
+        // Fallback para products.name se não encontrou em materials
+        final semDesc = codigos.where((c) => !descMap.containsKey(c)).toList();
+        if (semDesc.isNotEmpty) {
+          final prodRes = await service.supabase
+              .from('products')
+              .select('code, name')
+              .inFilter('code', semDesc);
+          for (final p in prodRes as List) {
+            descMap[p['code'].toString()] = p['name']?.toString() ?? '';
+          }
+        }
+      }
+
+      // 6. Monta materiais
+      materiais = itens.map((row) {
+        final codigo = row['product_id']?.toString() ?? '';
+        return MaterialPreco(
+          codigo: codigo,
+          description: descMap[codigo] ?? codigo,
+          precoAtual: double.tryParse(row['old_price'].toString()) ?? 0,
+          novoPreco: (row['price_edited'] == true)
+              ? double.tryParse(row['new_price'].toString()) ?? 0
+              : 0, // ← zera os que o usuário não mexeu
+          datab: row['datab']?.toString(),
+          datbi: row['datbi']?.toString(),
+          konwa: row['konwa']?.toString(),
+          kmein: row['kmein']?.toString(),
+          krech: row['krech']?.toString(),
+          mxwrt: row['mxwrt'] != null
+              ? double.tryParse(row['mxwrt'].toString())
+              : null,
+          sapStatus: row['sap_status']?.toString() ?? '',
+          origemMaterial: row['origem_material'] == 'manual'
+              ? OrigemMaterial.manual
+              : OrigemMaterial.sap,
+          bloqueado: false,
+          inativo: false,
+          cpv: row['cpv'] != null
+              ? double.tryParse(row['cpv'].toString())
+              : null,
+          kgSug: row['kg_sug'] != null
+              ? double.tryParse(row['kg_sug'].toString())
+              : null,
+        );
+      }).toList();
+
+      // Após: materiais = itens.map(...).toList();
+
+      try {
+        final codigos = materiais.map((m) => m.codigo).toList();
+        final prodRes =
+            await service.supabase
+                    .from('products')
+                    .select('code, pricing_cluster_id')
+                    .inFilter('code', codigos)
+                as List;
+
+        final Map<String, String> clusterMap = {};
+        for (final p in prodRes) {
+          final code = p['code']?.toString();
+          final cid = p['pricing_cluster_id']?.toString();
+          if (code != null && cid != null) clusterMap[code] = cid;
+        }
+
+        materiais = materiais
+            .map(
+              (m) => MaterialPreco(
+                codigo: m.codigo,
+                description: m.description,
+                precoAtual: m.precoAtual,
+                novoPreco: m.novoPreco,
+                cpv: m.cpv,
+                margemFlat: m.margemFlat,
+                margemOferta: m.margemOferta,
+                clusterId: clusterMap[m.codigo], // ← enriquecido
+                datab: m.datab,
+                datbi: m.datbi,
+                kgSug: m.kgSug,
+                konwa: m.konwa,
+                kmein: m.kmein,
+                krech: m.krech,
+                mxwrt: m.mxwrt,
+                sapStatus: m.sapStatus,
+                origemMaterial: m.origemMaterial,
+                bloqueado: m.bloqueado,
+                inativo: m.inativo,
+              ),
+            )
+            .toList();
+      } catch (_) {}
+
+      filtrados = List.from(materiais);
+
+      // 7. Regras de ajuste
+      regras = excRes.map((row) {
+        return RegraAjuste(
+          targetListId: row['target_list_id']?.toString() ?? '',
+          nivel: _mapNivelDe(row['level']?.toString()),
+          tipo: row['adjust_type'] == 'fixed' ? 'Fixo' : 'Percentual',
+          valor: double.tryParse(row['value'].toString()) ?? 0,
+          clusterId: row['cluster_id']?.toString(),
+          clusterNome: row['reference_desc']?.toString(),
+          materialId: row['material_id']?.toString(),
+          materialNome: row['reference_desc']?.toString(),
+        );
+      }).toList();
+    } catch (e) {
+      erro = 'Erro ao carregar rascunho: $e';
+    } finally {
+      loading = false;
+      notifyListeners();
+    }
+  }
+
+  /// YYYYMMDD → DD/MM/AAAA
+  String? _fromSapDate(String? sap) {
+    if (sap == null || sap.length < 8) return null;
+    return '${sap.substring(6, 8)}/${sap.substring(4, 6)}/${sap.substring(0, 4)}';
+  }
+
+  String _mapNivelDe(String? level) => switch (level) {
+    'material_group' => 'Grupo',
+    'specific_material' => 'Material',
+    _ => 'Geral',
+  };
 
   /// Converte DD/MM/AAAA → YYYYMMDD (formato SAP).
   String? _toSapDate(String? ddmmaaaa) {

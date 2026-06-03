@@ -6,6 +6,7 @@ class DraftAprovacao {
   final String? createdByEmail;
   final String? reviewedByEmail;
   final String? reviewedAt;
+  final String? justificativa;
 
   DraftAprovacao({
     required this.id,
@@ -15,6 +16,7 @@ class DraftAprovacao {
     this.createdByEmail,
     this.reviewedByEmail,
     this.reviewedAt,
+    this.justificativa,
   });
 
   factory DraftAprovacao.fromJson(Map<String, dynamic> json) {
@@ -29,6 +31,7 @@ class DraftAprovacao {
       createdByEmail: json['created_by_email']?.toString(),
       reviewedByEmail: json['reviewed_by_email']?.toString(),
       reviewedAt: json['reviewed_at']?.toString(),
+      justificativa: json['justificativa']?.toString(),
     );
   }
 }

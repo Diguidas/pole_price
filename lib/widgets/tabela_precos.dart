@@ -2,28 +2,45 @@ import 'package:flutter/material.dart';
 import 'package:pole_price/controllers/preco_controller.dart';
 import 'package:pole_price/models/material_preco.dart';
 
-class TabelaPrecos extends StatelessWidget {
+class TabelaPrecos extends StatefulWidget {
   final PrecoController controller;
-  final ScrollController scrollController;
 
   const TabelaPrecos({
     super.key,
     required this.controller,
-    required this.scrollController,
   });
 
   @override
+  State<TabelaPrecos> createState() => _TabelaPrecosState();
+}
+
+class _TabelaPrecosState extends State<TabelaPrecos> {
+  // ScrollController local — vive junto com este widget, não no singleton.
+  // Evita offsets obsoletos entre sessões e acúmulo de listeners.
+  late final ScrollController _scrollCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollCtrl = ScrollController();
+  }
+
+  @override
+  void dispose() {
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  PrecoController get ctrl => widget.controller;
+
+  @override
   Widget build(BuildContext context) {
-    if (controller.pltyp == null) {
+    if (ctrl.pltyp == null) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.table_chart_outlined,
-              size: 48,
-              color: Colors.grey.shade300,
-            ),
+            Icon(Icons.table_chart_outlined, size: 48, color: Colors.grey.shade300),
             const SizedBox(height: 12),
             Text(
               'Selecione uma tabela para ver os materiais',
@@ -34,7 +51,7 @@ class TabelaPrecos extends StatelessWidget {
       );
     }
 
-    if (controller.filtrados.isEmpty) {
+    if (ctrl.filtrados.isEmpty) {
       return Center(
         child: Text(
           'Nenhum material encontrado',
@@ -45,22 +62,24 @@ class TabelaPrecos extends StatelessWidget {
 
     return Column(
       children: [
-        _legenda(controller.filtrados),
+        RepaintBoundary(child: _legenda(ctrl.filtrados)),
         _cabecalho(),
         Expanded(
           child: ListView.builder(
-            controller: scrollController,
-            itemCount: controller.filtrados.length,
+            controller: _scrollCtrl,
+            itemCount: ctrl.filtrados.length,
+            addAutomaticKeepAlives: false,
+            addRepaintBoundaries: false,
             itemBuilder: (context, index) {
-              final m = controller.filtrados[index];
+              final m = ctrl.filtrados[index];
               return _ItemMaterial(
                 key: ValueKey(m.codigo),
                 material: m,
-                isLast: index == controller.filtrados.length - 1,
-                onPrecoChanged: (novo) => controller.atualizarPreco(m, novo),
+                isLast: index == ctrl.filtrados.length - 1,
+                onPrecoChanged: (novo) => ctrl.atualizarPreco(m, novo),
                 onPrecoConfirmado: (novo) =>
-                    controller.atualizarPreco(m, novo, promover: true),
-                onRemover: () => controller.removerMaterial(m),
+                    ctrl.atualizarPreco(m, novo, promover: true),
+                onRemover: () => ctrl.removerMaterial(m),
               );
             },
           ),

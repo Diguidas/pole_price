@@ -193,6 +193,7 @@ class PriceService {
   /// Os campos konwa, kmein, krech, mxwrt vêm diretamente do MaterialPreco
   /// (preenchidos ao buscar do SAP) e são persistidos para uso no applyDraft().
   Future<String> saveDraft({
+    String? draftId,
     required String? masterListId,
     required List<MaterialPreco> materiais,
     required List<String> targets,
@@ -203,34 +204,63 @@ class PriceService {
     String? vigenciaDatbi,
     String? justificativa,
     String sapStatus = '',
+    String draftStatus = 'pending',
   }) async {
     final userEmail = supabase.auth.currentUser?.email ?? 'desconhecido';
 
-    final draft = await supabase
-        .from('price_drafts')
-        .insert({
-          'master_list_id': masterListId,
-          'status': 'pending',
-          'created_by_email': userEmail,
-          if (justificativa != null && justificativa.isNotEmpty)
-            'justificativa': justificativa,
-        })
-        .select()
-        .single();
+    late String resolvedId;
 
-    final draftId = draft['id']?.toString() ?? '';
-    if (draftId.isEmpty) {
-      throw Exception('Falha ao criar rascunho de aprovacao.');
+    if (draftId != null) {
+      await supabase
+          .from('price_drafts')
+          .update({
+            'status': draftStatus,
+            'vigencia_datab': vigenciaDatab, // ← adicionar
+            'vigencia_datbi': vigenciaDatbi,
+            if (justificativa != null && justificativa.isNotEmpty)
+              'justificativa': justificativa,
+          })
+          .eq('id', draftId);
+
+      await Future.wait([
+        supabase.from('price_draft_items').delete().eq('draft_id', draftId),
+        supabase.from('price_draft_targets').delete().eq('draft_id', draftId),
+        supabase
+            .from('price_draft_exceptions')
+            .delete()
+            .eq('draft_id', draftId),
+      ]);
+
+      resolvedId = draftId;
+    } else {
+      final draft = await supabase
+          .from('price_drafts')
+          .insert({
+            'master_list_id': masterListId,
+            'status': draftStatus,
+            'created_by_email': userEmail,
+            'vigencia_datab': vigenciaDatab, // ← adicionar
+            'vigencia_datbi': vigenciaDatbi,
+            if (justificativa != null && justificativa.isNotEmpty)
+              'justificativa': justificativa,
+          })
+          .select()
+          .single();
+
+      resolvedId = draft['id']?.toString() ?? '';
+      if (resolvedId.isEmpty) throw Exception('Falha ao criar rascunho.');
     }
 
+    // ← tudo usa resolvedId daqui pra baixo
     final itens = materiais
         .where((m) => !m.removido)
         .map(
           (m) => {
-            'draft_id': draftId,
+            'draft_id': resolvedId,
             'product_id': m.codigo.trim(),
             'old_price': m.precoAtual,
             'new_price': m.novoPreco > 0 ? m.novoPreco : m.precoAtual,
+            'price_edited': m.novoPreco > 0,
             'margin_pct': m.margemReal,
             'datab': vigenciaDatab ?? m.datab,
             'datbi': vigenciaDatbi ?? m.datbi,
@@ -239,36 +269,39 @@ class PriceService {
             'origem_material': m.origemMaterial == OrigemMaterial.manual
                 ? 'manual'
                 : 'sap',
-            // ── Campos SAP necessários para o push de volta ao SAP ──
             'konwa': m.konwa,
             'kmein': m.kmein,
             'krech': m.krech,
             'mxwrt': m.mxwrt,
             'sap_status': sapStatus,
+            'cpv': m.cpv,
+            'kg_sug': m.kgSug,
           },
         )
         .toList();
 
     final targetRows = targets
-        .map((e) => {'draft_id': draftId, 'target_list_id': e})
+        .map((e) => {'draft_id': resolvedId, 'target_list_id': e})
         .toList();
 
-    final excRows = regras.map((r) {
-      return {
-        'draft_id': draftId,
-        'target_list_id': r.targetListId,
-        'level': _mapNivel(r.nivel),
-        'adjust_type': _mapTipo(r.tipo),
-        'value': r.valor,
-        'cluster_id': r.clusterId,
-        'material_id': r.materialId,
-        'reference_desc': r.nivel == 'Grupo'
-            ? r.clusterNome
-            : r.nivel == 'Material'
-            ? r.materialNome
-            : null,
-      };
-    }).toList();
+    final excRows = regras
+        .map(
+          (r) => {
+            'draft_id': resolvedId,
+            'target_list_id': r.targetListId,
+            'level': _mapNivel(r.nivel),
+            'adjust_type': _mapTipo(r.tipo),
+            'value': r.valor,
+            'cluster_id': r.clusterId,
+            'material_id': r.materialId,
+            'reference_desc': r.nivel == 'Grupo'
+                ? r.clusterNome
+                : r.nivel == 'Material'
+                ? r.materialNome
+                : null,
+          },
+        )
+        .toList();
 
     final insertFutures = <Future<dynamic>>[];
     if (itens.isNotEmpty) {
@@ -288,7 +321,7 @@ class PriceService {
       await Future.wait<dynamic>(insertFutures);
     }
 
-    return draftId;
+    return resolvedId; // ← era draftId antes, agora resolvedId
   }
 
   /// Aprova o draft: aplica os preços no Supabase E envia ao SAP.

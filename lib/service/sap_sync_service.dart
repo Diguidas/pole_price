@@ -53,6 +53,7 @@ class SapSyncService {
 
     return _mapEntriesToMateriais(
       entries.cast<dynamic>(),
+      pltyp: pltyp,
       datab: datab,
       datbi: datbi,
     );
@@ -87,10 +88,6 @@ class SapSyncService {
       },
     );
 
-    print('STATUS: ${res.status}');
-    print('RAW TYPE: ${res.data.runtimeType}');
-    print('RAW: ${res.data}');
-
     if (res.status == 204) return [];
     if (res.status != 200) {
       throw Exception('Falha ao buscar grupo SAP (${res.status}): ${res.data}');
@@ -107,6 +104,7 @@ class SapSyncService {
 
     return _mapEntriesToMateriais(
       entries.cast<dynamic>(),
+      pltyp: pltyp,
       datab: datab,
       datbi: datbi,
       kdgrp: kdgrp,
@@ -187,6 +185,7 @@ class SapSyncService {
 
   Future<List<MaterialPreco>> _mapEntriesToMateriais(
     List<dynamic> entries, {
+    String? pltyp,
     String? datab,
     String? datbi,
     String? kdgrp,
@@ -231,6 +230,30 @@ class SapSyncService {
       }
     }
 
+    // Busca margemFlat e margemOferta via price_lists → pricing_policies
+    double? margemFlat;
+    double? margemOferta;
+    if (pltyp != null) {
+      try {
+        final listRes = await supabase
+            .from('price_lists')
+            .select('policy_id, pricing_policies(margem_flat, margem_oferta)')
+            .eq('pltyp', pltyp)
+            .maybeSingle();
+        if (listRes != null) {
+          final policy = listRes['pricing_policies'] as Map<String, dynamic>?;
+          margemFlat = policy?['margem_flat'] != null
+              ? double.tryParse(policy!['margem_flat'].toString())
+              : null;
+          margemOferta = policy?['margem_oferta'] != null
+              ? double.tryParse(policy!['margem_oferta'].toString())
+              : null;
+        }
+      } catch (_) {
+        // Margens não encontradas — continua sem elas
+      }
+    }
+
     // Monta a lista final
     final result = <MaterialPreco>[];
     for (final entry in entries) {
@@ -266,6 +289,8 @@ class SapSyncService {
             precoAtual: double.tryParse(kbetr) ?? 0,
             clusterId: product?['pricing_cluster_id']?.toString(),
             cpv: cpvMap[matnr],
+            margemFlat: margemFlat,
+            margemOferta: margemOferta,
             datab: entryDatab,
             datbi: entryDatbi,
             origemMaterial: OrigemMaterial.sap,

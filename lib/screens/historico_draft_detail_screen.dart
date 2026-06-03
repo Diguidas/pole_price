@@ -11,6 +11,9 @@ class HistoricoDraftDetailScreen extends StatefulWidget {
   final String? reviewedByEmail;
   final String createdAt;
   final String reviewedAt;
+  final String? justificativa;
+  final String? vigenciaDatab; // formato SAP: YYYYMMDD
+  final String? vigenciaDatbi;
 
   const HistoricoDraftDetailScreen({
     super.key,
@@ -21,6 +24,9 @@ class HistoricoDraftDetailScreen extends StatefulWidget {
     this.reviewedByEmail,
     required this.createdAt,
     required this.reviewedAt,
+    this.justificativa,
+    this.vigenciaDatab,
+    this.vigenciaDatbi,
   });
 
   @override
@@ -211,6 +217,26 @@ class _HistoricoDraftDetailScreenState
                                 _metaChip(Icons.rate_review_outlined, '${_reviewLabel(widget.status)} em ${widget.reviewedAt}'),
                                 _metaChip(Icons.verified_user_outlined, widget.reviewedByEmail!),
                               ],
+                              // ── Vigência ──────────────────────────────
+                              if (_fmtSapDate(widget.vigenciaDatab) != null || _fmtSapDate(widget.vigenciaDatbi) != null)
+                                _metaChip(
+                                  Icons.date_range_outlined,
+                                  () {
+                                    final ini = _fmtSapDate(widget.vigenciaDatab);
+                                    final fim = _fmtSapDate(widget.vigenciaDatbi);
+                                    if (ini != null && fim != null) return 'Vigência: $ini → $fim';
+                                    if (ini != null) return 'Vigência a partir de $ini';
+                                    return 'Vigência até $fim';
+                                  }(),
+                                  color: const Color(0xFF0369A1),
+                                ),
+                              // ── Justificativa ─────────────────────────
+                              if (widget.justificativa != null && widget.justificativa!.trim().isNotEmpty)
+                                _metaChip(
+                                  Icons.notes_rounded,
+                                  widget.justificativa!.trim(),
+                                  color: const Color(0xFF6D28D9),
+                                ),
                             ],
                           ),
                         ],
@@ -310,13 +336,14 @@ class _HistoricoDraftDetailScreenState
     );
   }
 
-  Widget _metaChip(IconData icon, String label) {
+  Widget _metaChip(IconData icon, String label, {Color? color}) {
+    final c = color ?? _slate600;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 14, color: _slate600),
+        Icon(icon, size: 14, color: c),
         const SizedBox(width: 6),
-        Text(label, style: const TextStyle(fontSize: 12, color: _slate600, fontWeight: FontWeight.w500)),
+        Text(label, style: TextStyle(fontSize: 12, color: c, fontWeight: FontWeight.w500)),
       ],
     );
   }
@@ -326,6 +353,13 @@ class _HistoricoDraftDetailScreenState
         'rejected' => 'Rejeitado',
         _ => 'Revisado',
       };
+
+  /// Converte YYYYMMDD → DD/MM/AAAA. Retorna null se inválido ou vazio.
+  String? _fmtSapDate(String? s) {
+    if (s == null || s.length < 8) return null;
+    if (s == '99991231') return 'em aberto';
+    return '${s.substring(6, 8)}/${s.substring(4, 6)}/${s.substring(0, 4)}';
+  }
 }
 
 class _KpisSummary {
