@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:pole_price/controllers/permissao_controller.dart';
 import 'package:pole_price/controllers/preco_controller.dart';
 import 'package:pole_price/screens/home_screen.dart';
+import 'package:pole_price/screens/material/materials_screen.dart';
 import 'package:pole_price/screens/preco_screen.dart';
 import 'package:pole_price/screens/grupos_screen.dart';
 import 'package:pole_price/screens/definir_aprovacoes_screen.dart';
@@ -194,6 +195,14 @@ class _AppShellState extends State<AppShell> {
     );
     if (params == null || !mounted) return;
 
+    ctrl.pltyp = null;
+    ctrl.kdgrp = null;
+    ctrl.datab = null;
+    ctrl.datbi = null;
+    ctrl.databOp = null;
+    ctrl.datbiOp = null;
+    ctrl.modo = SapModo.lista;
+
     ctrl.modo = params.modo;
     ctrl.pltyp = params.pltyp;
     ctrl.kdgrp = params.kdgrp;
@@ -248,7 +257,7 @@ class _AppShellState extends State<AppShell> {
                 draftId: _draftIdInicial, // ← passar aqui
               )
             : const SizedBox.shrink(),
-      AppPage.grupos => const GruposScreen(),
+      AppPage.grupos => const MaterialsScreen(),
       AppPage.rascunhos => const RascunhosScreen(),
       AppPage.aprovacoes => AprovacoesScreen(draftIdInicial: _draftIdInicial),
       AppPage.historico => const HistoricoScreen(),

@@ -6,7 +6,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 const _laranja = Color(0xFFFF6B00);
 
 /// Retorna a lista de [MaterialPreco] adicionados, ou null se cancelado.
-/// Substitui o sheet antigo que retornava apenas um material por vez.
 class BuscaMaterialSheet extends StatefulWidget {
   final PrecoController controller;
   const BuscaMaterialSheet({super.key, required this.controller});
@@ -19,17 +18,25 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
   final _supabase = Supabase.instance.client;
   final _searchController = TextEditingController();
 
-  // Resultados da busca (excluindo já adicionados à sessão)
+  // ── Modo: material ou grupo ───────────────────────────────────────────────
+  bool _modoGrupo = false;
+
+  // ── Estado modo material ──────────────────────────────────────────────────
   List<Map<String, dynamic>> _resultados = [];
 
-  // Códigos selecionados pelo usuário nesta sessão do sheet
-  final Set<String> _selecionados = {};
+  // ── Estado modo grupo ─────────────────────────────────────────────────────
+  List<Map<String, dynamic>> _grupos = [];
+  // clusterId → lista de produtos
+  final Map<String, List<Map<String, dynamic>>> _materiaisPorGrupo = {};
+  // quais grupos estão expandidos
+  final Set<String> _expandidos = {};
+  bool _loadingGrupos = false;
 
+  // ── Compartilhado ─────────────────────────────────────────────────────────
+  final Set<String> _selecionados = {};
   bool _loading = false;
   bool _confirmando = false;
   String? _erro;
-
-  // Conjunto de códigos já presentes no controller (ocultar da lista)
   late final Set<String> _jaAdicionados;
 
   @override
@@ -39,7 +46,6 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
         .where((m) => !m.removido)
         .map((m) => m.codigo)
         .toSet();
-    // Carrega lista inicial ao abrir
     WidgetsBinding.instance.addPostFrameCallback((_) => _buscar(''));
   }
 
@@ -49,7 +55,7 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
     super.dispose();
   }
 
-  // ── Busca ─────────────────────────────────────────────────────────────────
+  // ── Busca modo material ───────────────────────────────────────────────────
 
   Future<void> _buscar(String q) async {
     setState(() {
@@ -58,8 +64,6 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
     });
 
     try {
-      // Com query vazia: carrega os primeiros produtos (lista inicial)
-      // Com query preenchida: filtra por código ou nome
       final query = _supabase
           .from('products')
           .select('code, name, pricing_cluster_id')
@@ -78,8 +82,6 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
       List<Map<String, dynamic>> resultados =
           List<Map<String, dynamic>>.from(productsRes as List);
 
-      // Fallback: busca por matnr em price_list_items → cruza com products
-      // (apenas quando há query; lista inicial não precisa disso)
       if (resultados.isEmpty && q.trim().isNotEmpty) {
         final itemsRes = await _supabase
             .from('price_list_items')
@@ -100,7 +102,6 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
               .order('name');
           resultados = List<Map<String, dynamic>>.from(prodRes as List);
 
-          // Para matnrs sem cadastro em products, cria entrada mínima
           final encontrados =
               resultados.map((r) => r['code'].toString()).toSet();
           for (final matnr in matnrs) {
@@ -115,8 +116,8 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
         }
       }
 
-      // Remove os materiais já presentes na sessão atual
-      resultados.removeWhere((p) => _jaAdicionados.contains(p['code']?.toString()));
+      resultados.removeWhere(
+          (p) => _jaAdicionados.contains(p['code']?.toString()));
 
       setState(() => _resultados = resultados);
     } catch (e) {
@@ -126,7 +127,92 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
     }
   }
 
-  // ── Toggle de seleção ─────────────────────────────────────────────────────
+  // ── Busca modo grupo ──────────────────────────────────────────────────────
+
+  Future<void> _carregarGrupos() async {
+    if (_grupos.isNotEmpty) return;
+    setState(() => _loadingGrupos = true);
+    try {
+      final res = await _supabase
+          .from('pricing_clusters')
+          .select('id, name')
+          .order('name');
+      setState(() => _grupos = List<Map<String, dynamic>>.from(res as List));
+    } catch (e) {
+      setState(() => _erro = 'Erro ao carregar grupos: $e');
+    } finally {
+      setState(() => _loadingGrupos = false);
+    }
+  }
+
+  Future<void> _expandirGrupo(String clusterId) async {
+    if (_materiaisPorGrupo.containsKey(clusterId)) {
+      setState(() {
+        if (_expandidos.contains(clusterId)) {
+          _expandidos.remove(clusterId);
+        } else {
+          _expandidos.add(clusterId);
+        }
+      });
+      return;
+    }
+
+    setState(() => _expandidos.add(clusterId));
+
+    try {
+      final res = await _supabase
+          .from('products')
+          .select('code, name, pricing_cluster_id')
+          .eq('pricing_cluster_id', clusterId)
+          .order('name');
+
+      final materiais = List<Map<String, dynamic>>.from(res as List)
+          .where((p) => !_jaAdicionados.contains(p['code']?.toString()))
+          .toList();
+
+      setState(() => _materiaisPorGrupo[clusterId] = materiais);
+    } catch (e) {
+      setState(() {
+        _erro = 'Erro ao carregar materiais do grupo: $e';
+        _expandidos.remove(clusterId);
+      });
+    }
+  }
+
+  // ── Seleção por grupo (todos os materiais do grupo) ───────────────────────
+
+  void _toggleGrupo(String clusterId) {
+    final materiais = _materiaisPorGrupo[clusterId] ?? [];
+    if (materiais.isEmpty) return;
+
+    final codigos = materiais.map((m) => m['code'].toString()).toSet();
+    final todosMarcados = codigos.every(_selecionados.contains);
+
+    setState(() {
+      if (todosMarcados) {
+        _selecionados.removeAll(codigos);
+      } else {
+        _selecionados.addAll(codigos);
+      }
+    });
+  }
+
+  bool _grupoTodosMarcado(String clusterId) {
+    final materiais = _materiaisPorGrupo[clusterId] ?? [];
+    if (materiais.isEmpty) return false;
+    return materiais
+        .map((m) => m['code'].toString())
+        .every(_selecionados.contains);
+  }
+
+  bool _grupoAlgumMarcado(String clusterId) {
+    final materiais = _materiaisPorGrupo[clusterId] ?? [];
+    return materiais
+        .map((m) => m['code'].toString())
+        .any(_selecionados.contains);
+  }
+
+  // ── Toggle individual ─────────────────────────────────────────────────────
 
   void _toggle(String code) {
     setState(() {
@@ -138,7 +224,7 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
     });
   }
 
-  // ── Confirmar seleção múltipla ────────────────────────────────────────────
+  // ── Confirmar ─────────────────────────────────────────────────────────────
 
   Future<void> _confirmar() async {
     if (_selecionados.isEmpty) {
@@ -149,7 +235,6 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
     setState(() => _confirmando = true);
 
     try {
-      // Busca produtos selecionados (para ter cluster_id e nome garantidos)
       final codigosList = _selecionados.toList();
 
       final prodRows = await _supabase
@@ -162,7 +247,6 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
           r['code'].toString(): r as Map<String, dynamic>
       };
 
-      // Busca CPV mais recente (período mais alto) em lote
       final periodRes = await _supabase
           .from('product_costs')
           .select('period')
@@ -187,10 +271,8 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
         }
       }
 
-      // Monta os MaterialPreco
       final materiais = codigosList.map((code) {
         final prod = prodMap[code];
-        // Fallback para item sem cadastro em products (veio do matnr)
         final resultadoFallback =
             _resultados.firstWhere((r) => r['code'] == code, orElse: () => {});
 
@@ -241,15 +323,18 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: SizedBox(
         width: 520,
-        height: 580,
+        height: 600,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildHeader(),
-            _buildSearchBar(),
-            _buildActionBar(),
+            _buildToggle(),
+            if (!_modoGrupo) _buildSearchBar(),
+            if (!_modoGrupo) _buildActionBar(),
             const Divider(height: 1, color: Color(0xFFF0F0F0)),
-            Expanded(child: _buildList()),
+            Expanded(
+              child: _modoGrupo ? _buildListaGrupos() : _buildListaMateriais(),
+            ),
             _buildFooter(),
           ],
         ),
@@ -281,16 +366,19 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
             ),
           ),
           const SizedBox(width: 12),
-          const Column(
+          Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
+              const Text(
                 'Adicionar materiais',
                 style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
               ),
               Text(
-                'Busque por código ou descrição',
-                style: TextStyle(fontSize: 11, color: Color(0xFF9E9E9E)),
+                _modoGrupo
+                    ? 'Selecione um grupo para ver seus materiais'
+                    : 'Busque por código ou descrição',
+                style:
+                    const TextStyle(fontSize: 11, color: Color(0xFF9E9E9E)),
               ),
             ],
           ),
@@ -304,11 +392,103 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
     );
   }
 
-  // ── Campo de busca ────────────────────────────────────────────────────────
+  // ── Toggle Material / Grupo ───────────────────────────────────────────────
+
+  Widget _buildToggle() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+      child: Container(
+        height: 36,
+        decoration: BoxDecoration(
+          color: const Color(0xFFF3F4F6),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            _toggleBtn(
+              label: 'Por material',
+              icon: Icons.inventory_2_outlined,
+              ativo: !_modoGrupo,
+              onTap: () {
+                if (_modoGrupo) {
+                  setState(() => _modoGrupo = false);
+                  _searchController.clear();
+                  _buscar('');
+                }
+              },
+            ),
+            _toggleBtn(
+              label: 'Por grupo',
+              icon: Icons.account_tree_outlined,
+              ativo: _modoGrupo,
+              onTap: () {
+                if (!_modoGrupo) {
+                  setState(() => _modoGrupo = true);
+                  _carregarGrupos();
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _toggleBtn({
+    required String label,
+    required IconData icon,
+    required bool ativo,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          margin: const EdgeInsets.all(3),
+          decoration: BoxDecoration(
+            color: ativo ? Colors.white : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            boxShadow: ativo
+                ? [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.07),
+                      blurRadius: 4,
+                      offset: const Offset(0, 1),
+                    )
+                  ]
+                : [],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 13,
+                color: ativo ? _laranja : const Color(0xFF9E9E9E),
+              ),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight:
+                      ativo ? FontWeight.w600 : FontWeight.w400,
+                  color: ativo ? _laranja : const Color(0xFF9E9E9E),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Campo de busca (modo material) ────────────────────────────────────────
 
   Widget _buildSearchBar() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
       child: TextField(
         controller: _searchController,
         autofocus: true,
@@ -351,11 +531,12 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
     );
   }
 
-  // ── Barra de ações (contador + selecionar todos) ──────────────────────────
+  // ── Barra de ações (modo material) ────────────────────────────────────────
 
   Widget _buildActionBar() {
     final todosVisiveis = _resultados.isNotEmpty &&
-        _resultados.every((r) => _selecionados.contains(r['code']?.toString()));
+        _resultados
+            .every((r) => _selecionados.contains(r['code']?.toString()));
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
@@ -365,7 +546,8 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
             _resultados.isEmpty
                 ? 'Nenhum resultado'
                 : '${_resultados.length} resultado${_resultados.length != 1 ? 's' : ''}',
-            style: const TextStyle(fontSize: 11, color: Color(0xFF9E9E9E)),
+            style:
+                const TextStyle(fontSize: 11, color: Color(0xFF9E9E9E)),
           ),
           const Spacer(),
           if (_resultados.isNotEmpty)
@@ -413,30 +595,23 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
     );
   }
 
-  // ── Lista de resultados ───────────────────────────────────────────────────
+  // ── Lista modo material ───────────────────────────────────────────────────
 
-  Widget _buildList() {
+  Widget _buildListaMateriais() {
     if (_erro != null) {
       return Center(
-        child: Text(_erro!, style: const TextStyle(color: Colors.red)),
-      );
+          child: Text(_erro!, style: const TextStyle(color: Colors.red)));
     }
-
     if (_resultados.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              Icons.search_off,
-              size: 32,
-              color: Colors.grey.shade300,
-            ),
+            Icon(Icons.search_off, size: 32, color: Colors.grey.shade300),
             const SizedBox(height: 8),
-            Text(
-              'Nenhum resultado encontrado',
-              style: TextStyle(fontSize: 13, color: Colors.grey.shade400),
-            ),
+            Text('Nenhum resultado encontrado',
+                style:
+                    TextStyle(fontSize: 13, color: Colors.grey.shade400)),
           ],
         ),
       );
@@ -450,85 +625,284 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
         final code = p['code']?.toString() ?? '';
         final name = p['name']?.toString() ?? '';
         final marcado = _selecionados.contains(code);
+        return _materialTile(
+            code: code, name: name, marcado: marcado, onTap: () => _toggle(code));
+      },
+    );
+  }
 
-        return InkWell(
-          onTap: () => _toggle(code),
-          borderRadius: BorderRadius.circular(8),
-          child: Container(
-            margin: const EdgeInsets.symmetric(vertical: 2),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-            decoration: BoxDecoration(
-              color: marcado ? _laranja.withOpacity(0.05) : Colors.transparent,
+  // ── Lista modo grupo ──────────────────────────────────────────────────────
+
+  Widget _buildListaGrupos() {
+    if (_erro != null) {
+      return Center(
+          child: Text(_erro!, style: const TextStyle(color: Colors.red)));
+    }
+    if (_loadingGrupos) {
+      return const Center(child: CircularProgressIndicator(color: _laranja));
+    }
+    if (_grupos.isEmpty) {
+      return Center(
+        child: Text('Nenhum grupo encontrado',
+            style: TextStyle(fontSize: 13, color: Colors.grey.shade400)),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      itemCount: _grupos.length,
+      itemBuilder: (context, index) {
+        final grupo = _grupos[index];
+        final clusterId = grupo['id'].toString();
+        final nome = grupo['name']?.toString() ?? clusterId;
+        final expandido = _expandidos.contains(clusterId);
+        final materiais = _materiaisPorGrupo[clusterId];
+        final todosMarcado = _grupoTodosMarcado(clusterId);
+        final algumMarcado = _grupoAlgumMarcado(clusterId);
+        final qtdSelecionados = materiais
+                ?.where((m) => _selecionados.contains(m['code'].toString()))
+                .length ??
+            0;
+
+        return Column(
+          children: [
+            // ── Linha do grupo ──────────────────────────────────────
+            InkWell(
+              onTap: () => _expandirGrupo(clusterId),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: marcado
-                    ? _laranja.withOpacity(0.2)
-                    : Colors.transparent,
+              child: Container(
+                margin: const EdgeInsets.symmetric(vertical: 2),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: algumMarcado
+                      ? _laranja.withOpacity(0.04)
+                      : const Color(0xFFFAFAFA),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: algumMarcado
+                        ? _laranja.withOpacity(0.15)
+                        : const Color(0xFFEEEEEE),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    // Checkbox do grupo
+                    GestureDetector(
+                      onTap: materiais != null
+                          ? () => _toggleGrupo(clusterId)
+                          : null,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        width: 18,
+                        height: 18,
+                        decoration: BoxDecoration(
+                          color: todosMarcado
+                              ? _laranja
+                              : algumMarcado
+                                  ? _laranja.withOpacity(0.3)
+                                  : Colors.transparent,
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                            color: algumMarcado
+                                ? _laranja
+                                : const Color(0xFFCCCCCC),
+                            width: 1.5,
+                          ),
+                        ),
+                        child: todosMarcado
+                            ? const Icon(Icons.check,
+                                size: 12, color: Colors.white)
+                            : algumMarcado
+                                ? const Icon(Icons.remove,
+                                    size: 12, color: Colors.white)
+                                : null,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    // Ícone grupo
+                    Container(
+                      padding: const EdgeInsets.all(5),
+                      decoration: BoxDecoration(
+                        color: _laranja.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Icon(Icons.account_tree_outlined,
+                          size: 13, color: _laranja),
+                    ),
+                    const SizedBox(width: 10),
+                    // Nome
+                    Expanded(
+                      child: Text(
+                        nome,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: algumMarcado
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                          color: algumMarcado
+                              ? const Color(0xFF212121)
+                              : const Color(0xFF424242),
+                        ),
+                      ),
+                    ),
+                    // Badge qtd selecionados
+                    if (qtdSelecionados > 0) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: _laranja,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          '$qtdSelecionados',
+                          style: const TextStyle(
+                              fontSize: 10,
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    // Seta expand
+                    AnimatedRotation(
+                      turns: expandido ? 0.25 : 0,
+                      duration: const Duration(milliseconds: 150),
+                      child: const Icon(Icons.chevron_right,
+                          size: 16, color: Color(0xFFBBBBBB)),
+                    ),
+                  ],
+                ),
               ),
             ),
-            child: Row(
-              children: [
-                // Checkbox animado
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  width: 18,
-                  height: 18,
-                  decoration: BoxDecoration(
-                    color: marcado ? _laranja : Colors.transparent,
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(
-                      color: marcado ? _laranja : const Color(0xFFCCCCCC),
-                      width: 1.5,
+
+            // ── Materiais do grupo (expandido) ──────────────────────
+            if (expandido) ...[
+              if (materiais == null)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: Center(
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: _laranja),
                     ),
                   ),
-                  child: marcado
-                      ? const Icon(Icons.check, size: 12, color: Colors.white)
-                      : null,
-                ),
-                const SizedBox(width: 12),
-                // Badge do código
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 7, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: marcado
-                        ? _laranja.withOpacity(0.1)
-                        : const Color(0xFFF0F0F0),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    code,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontFamily: 'monospace',
-                      color: marcado
-                          ? _laranja
-                          : const Color(0xFF616161),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                // Descrição
-                Expanded(
-                  child: Text(
-                    name,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight:
-                          marcado ? FontWeight.w500 : FontWeight.w400,
-                      color: marcado
-                          ? const Color(0xFF212121)
-                          : const Color(0xFF424242),
-                    ),
-                    overflow: TextOverflow.ellipsis,
+                )
+              else if (materiais.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(left: 40, top: 4, bottom: 4),
+                  child: Text('Nenhum material disponível',
+                      style: TextStyle(
+                          fontSize: 12, color: Colors.grey.shade400)),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.only(left: 28),
+                  child: Column(
+                    children: materiais.map((m) {
+                      final code = m['code'].toString();
+                      final name = m['name']?.toString() ?? '';
+                      final marcado = _selecionados.contains(code);
+                      return _materialTile(
+                        code: code,
+                        name: name,
+                        marcado: marcado,
+                        onTap: () => _toggle(code),
+                      );
+                    }).toList(),
                   ),
                 ),
-              ],
-            ),
-          ),
+            ],
+          ],
         );
       },
+    );
+  }
+
+  // ── Tile de material (compartilhado) ──────────────────────────────────────
+
+  Widget _materialTile({
+    required String code,
+    required String name,
+    required bool marcado,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        decoration: BoxDecoration(
+          color:
+              marcado ? _laranja.withOpacity(0.05) : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: marcado
+                ? _laranja.withOpacity(0.2)
+                : Colors.transparent,
+          ),
+        ),
+        child: Row(
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(
+                color: marcado ? _laranja : Colors.transparent,
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(
+                  color:
+                      marcado ? _laranja : const Color(0xFFCCCCCC),
+                  width: 1.5,
+                ),
+              ),
+              child: marcado
+                  ? const Icon(Icons.check, size: 12, color: Colors.white)
+                  : null,
+            ),
+            const SizedBox(width: 12),
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              decoration: BoxDecoration(
+                color: marcado
+                    ? _laranja.withOpacity(0.1)
+                    : const Color(0xFFF0F0F0),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                code,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                  color:
+                      marcado ? _laranja : const Color(0xFF616161),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                name,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight:
+                      marcado ? FontWeight.w500 : FontWeight.w400,
+                  color: marcado
+                      ? const Color(0xFF212121)
+                      : const Color(0xFF424242),
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -561,18 +935,19 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
             ),
           const Spacer(),
           TextButton(
-            onPressed:
-                _confirmando ? null : () => Navigator.pop(context, <MaterialPreco>[]),
+            onPressed: _confirmando
+                ? null
+                : () => Navigator.pop(context, <MaterialPreco>[]),
             style: TextButton.styleFrom(
                 foregroundColor: const Color(0xFF9E9E9E)),
-            child: const Text('Cancelar', style: TextStyle(fontSize: 13)),
+            child:
+                const Text('Cancelar', style: TextStyle(fontSize: 13)),
           ),
           const SizedBox(width: 8),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: _selecionados.isEmpty
-                  ? const Color(0xFFE0E0E0)
-                  : _laranja,
+              backgroundColor:
+                  _selecionados.isEmpty ? const Color(0xFFE0E0E0) : _laranja,
               foregroundColor: Colors.white,
               elevation: 0,
               padding: const EdgeInsets.symmetric(
@@ -589,7 +964,8 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
                     child: CircularProgressIndicator(
                         strokeWidth: 2, color: Colors.white),
                   )
-                : const Text('Confirmar', style: TextStyle(fontSize: 13)),
+                : const Text('Confirmar',
+                    style: TextStyle(fontSize: 13)),
           ),
         ],
       ),

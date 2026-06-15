@@ -398,15 +398,9 @@ class PrecoController extends ChangeNotifier {
     vigenciaGlobalDatab = null;
     vigenciaGlobalDatbi = null;
     erro = null;
-    draftIdAtivo = null; // ← adicionar
-    // Zera parâmetros SAP para não vazar sessão anterior
-    pltyp = null; // ← adicionar
-    kdgrp = null; // ← adicionar
-    datab = null; // ← adicionar
-    datbi = null; // ← adicionar
-    databOp = null; // ← adicionar
-    datbiOp = null; // ← adicionar
-    modo = SapModo.lista; // ← adicionar
+    draftIdAtivo = null;
+    // ← REMOVIDO: pltyp, kdgrp, datab, datbi, databOp, datbiOp, modo
+    // Esses são setados pelo goToPrecos/goToPrecosComRascunho antes da tela montar
     notifyListeners();
   }
 
@@ -541,7 +535,7 @@ class PrecoController extends ChangeNotifier {
           precoAtual: double.tryParse(row['old_price'].toString()) ?? 0,
           novoPreco: (row['price_edited'] == true)
               ? double.tryParse(row['new_price'].toString()) ?? 0
-              : 0, // ← zera os que o usuário não mexeu
+              : 0,
           datab: row['datab']?.toString(),
           datbi: row['datbi']?.toString(),
           konwa: row['konwa']?.toString(),
@@ -561,6 +555,19 @@ class PrecoController extends ChangeNotifier {
               : null,
           kgSug: row['kg_sug'] != null
               ? double.tryParse(row['kg_sug'].toString())
+              : null,
+          // ← NOVOS: restaura overrides de sessão persistidos no draft
+          ppcNovoOverride: row['ppc_novo'] != null
+              ? double.tryParse(row['ppc_novo'].toString())
+              : null,
+          ppcOfertaOverride: row['ppc_oferta'] != null
+              ? double.tryParse(row['ppc_oferta'].toString())
+              : null,
+          margemFlatOverride: row['margem_flat_override'] != null
+              ? double.tryParse(row['margem_flat_override'].toString())
+              : null,
+          margemOfertaOverride: row['margem_oferta_override'] != null
+              ? double.tryParse(row['margem_oferta_override'].toString())
               : null,
         );
       }).toList();
@@ -593,10 +600,13 @@ class PrecoController extends ChangeNotifier {
                 cpv: m.cpv,
                 margemFlat: m.margemFlat,
                 margemOferta: m.margemOferta,
-                clusterId: clusterMap[m.codigo], // ← enriquecido
+                clusterId: clusterMap[m.codigo],
                 datab: m.datab,
                 datbi: m.datbi,
                 kgSug: m.kgSug,
+                pesoUnidade: m.pesoUnidade, // ← NOVO
+                pesoCaixa: m.pesoCaixa, // ← NOVO
+                unidadeVenda: m.unidadeVenda, // ← NOVO
                 konwa: m.konwa,
                 kmein: m.kmein,
                 krech: m.krech,

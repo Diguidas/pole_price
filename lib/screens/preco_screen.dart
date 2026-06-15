@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:pole_price/controllers/preco_controller.dart';
 import 'package:pole_price/widgets/preco/painel_esquerdo.dart';
-import 'package:pole_price/widgets/preco/painel_direito.dart';
 import 'package:pole_price/widgets/preco/preco_topbar.dart';
 
 class PrecoScreen extends StatefulWidget {
@@ -58,20 +57,7 @@ class _PrecoScreenState extends State<PrecoScreen> {
                   )
                 : Padding(
                     padding: const EdgeInsets.all(20),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          flex: 3,
-                          child: PainelEsquerdo(controller: controller),
-                        ),
-                        const SizedBox(width: 20),
-                        Expanded(
-                          flex: 2,
-                          child: PainelDireito(controller: controller),
-                        ),
-                      ],
-                    ),
+                    child: PainelEsquerdo(controller: controller),
                   ),
           ),
         ],

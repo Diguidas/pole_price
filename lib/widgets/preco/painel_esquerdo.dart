@@ -43,7 +43,9 @@ class _PainelEsquerdoState extends State<PainelEsquerdo> {
   Widget build(BuildContext context) {
     final temDados = c.materiais.isNotEmpty;
 
-    return Container(
+    return SizedBox(
+      height: double.infinity,
+      child: Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
@@ -132,7 +134,7 @@ class _PainelEsquerdoState extends State<PainelEsquerdo> {
             ),
         ],
       ),
-    );
+    )); // SizedBox + Container
   }
 
   Future<void> _abrirBuscaMaterial(BuildContext context) async {

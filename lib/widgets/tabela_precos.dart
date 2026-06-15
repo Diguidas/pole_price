@@ -2,36 +2,69 @@ import 'package:flutter/material.dart';
 import 'package:pole_price/controllers/preco_controller.dart';
 import 'package:pole_price/models/material_preco.dart';
 
+const _laranja = Color(0xFFFF6B00);
+const _azulInfo = Color(0xFF0EA5E9);
+
+// ── Paleta das seções ────────────────────────────────────────────────────────
+const _corAtualBg     = Color(0xFFF0F6FF);
+const _corAtualBorda  = Color(0xFFBFD7FF);
+const _corAtualLabel  = Color(0xFF3B82F6);
+
+const _corNovoBg      = Color(0xFFFFF8F2);
+const _corNovoBorda   = Color(0xFFFFCCA0);
+const _corNovoLabel   = Color(0xFFFF6B00);
+
+const _corOfertaBg    = Color(0xFFF0FDF6);
+const _corOfertaBorda = Color(0xFF86EFAC);
+const _corOfertaLabel = Color(0xFF16A34A);
+
+// Alturas e tamanhos base
+const _labelFontSize  = 10.0;
+const _valorFontSize  = 13.0;
+const _inputFontSize  = 13.0;
+const _rowVPad        = 14.0;
+const _rowHPad        = 16.0;
+
 class TabelaPrecos extends StatefulWidget {
   final PrecoController controller;
-
-  const TabelaPrecos({
-    super.key,
-    required this.controller,
-  });
+  const TabelaPrecos({super.key, required this.controller});
 
   @override
   State<TabelaPrecos> createState() => _TabelaPrecosState();
 }
 
 class _TabelaPrecosState extends State<TabelaPrecos> {
-  // ScrollController local — vive junto com este widget, não no singleton.
-  // Evita offsets obsoletos entre sessões e acúmulo de listeners.
-  late final ScrollController _scrollCtrl;
+  final ScrollController _scrollCtrl = ScrollController();
+  String? _filtroAtivo;
 
-  @override
-  void initState() {
-    super.initState();
-    _scrollCtrl = ScrollController();
+  PrecoController get ctrl => widget.controller;
+
+  List<MaterialPreco> get _listaExibida {
+    final base = ctrl.filtrados;
+    if (_filtroAtivo == null) return base;
+    return base.where((m) {
+      switch (_filtroAtivo) {
+        case 'ok':         return m.statusMargem == 'ok';
+        case 'atencao':    return m.statusMargem == 'atencao';
+        case 'critico':    return m.statusMargem == 'critico';
+        case 'prejuizo':   return m.statusMargem == 'prejuizo';
+        case 'sem margem': return m.statusMargem == 'sem margem';
+        case 'sem-cpv':    return m.statusMargem == 'sem-cpv';
+        case 'bloqueado':  return m.bloqueado;
+        case 'inativo':    return m.inativo;
+        default:           return true;
+      }
+    }).toList();
   }
+
+  void _alternarFiltro(String chave) =>
+      setState(() => _filtroAtivo = _filtroAtivo == chave ? null : chave);
 
   @override
   void dispose() {
     _scrollCtrl.dispose();
     super.dispose();
   }
-
-  PrecoController get ctrl => widget.controller;
 
   @override
   Widget build(BuildContext context) {
@@ -40,169 +73,269 @@ class _TabelaPrecosState extends State<TabelaPrecos> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.table_chart_outlined, size: 48, color: Colors.grey.shade300),
-            const SizedBox(height: 12),
+            Icon(Icons.table_chart_outlined, size: 56, color: Colors.grey.shade200),
+            const SizedBox(height: 14),
             Text(
               'Selecione uma tabela para ver os materiais',
-              style: TextStyle(color: Colors.grey.shade500),
+              style: TextStyle(color: Colors.grey.shade400, fontSize: 14),
             ),
           ],
         ),
       );
     }
 
-    if (ctrl.filtrados.isEmpty) {
-      return Center(
-        child: Text(
-          'Nenhum material encontrado',
-          style: TextStyle(color: Colors.grey.shade500),
-        ),
-      );
-    }
+    final lista = _listaExibida;
 
     return Column(
       children: [
         RepaintBoundary(child: _legenda(ctrl.filtrados)),
         _cabecalho(),
-        Expanded(
-          child: ListView.builder(
-            controller: _scrollCtrl,
-            itemCount: ctrl.filtrados.length,
-            addAutomaticKeepAlives: false,
-            addRepaintBoundaries: false,
-            itemBuilder: (context, index) {
-              final m = ctrl.filtrados[index];
-              return _ItemMaterial(
-                key: ValueKey(m.codigo),
-                material: m,
-                isLast: index == ctrl.filtrados.length - 1,
-                onPrecoChanged: (novo) => ctrl.atualizarPreco(m, novo),
-                onPrecoConfirmado: (novo) =>
-                    ctrl.atualizarPreco(m, novo, promover: true),
-                onRemover: () => ctrl.removerMaterial(m),
-              );
-            },
+        if (lista.isEmpty)
+          Expanded(
+            child: Center(
+              child: Text(
+                _filtroAtivo != null
+                    ? 'Nenhum material para este filtro'
+                    : 'Nenhum material encontrado',
+                style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+              ),
+            ),
+          )
+        else
+          Expanded(
+            child: ListView.builder(
+              controller: _scrollCtrl,
+              itemCount: lista.length,
+              addAutomaticKeepAlives: false,
+              addRepaintBoundaries: false,
+              itemBuilder: (context, index) {
+                final m = lista[index];
+                return _ItemMaterial(
+                  key: ValueKey(m.codigo),
+                  material: m,
+                  isLast: index == lista.length - 1,
+                  onChanged: () => setState(() {}),
+                  onRemover: () => ctrl.removerMaterial(m),
+                );
+              },
+            ),
           ),
-        ),
       ],
     );
   }
 
+  // ── Cabeçalho ──────────────────────────────────────────────────────────────
+
   Widget _cabecalho() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: _rowHPad, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFFF1F5F9),
-        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+        color: const Color(0xFFF8FAFC),
+        border: Border(
+          bottom: BorderSide(color: Colors.grey.shade200),
+        ),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Borda status (3px) — espaçador
-          const SizedBox(width: 3),
-          const SizedBox(width: 8),
-          _cabTxt('Código / Descrição', flex: 5),
-          _cabTxt('Vigência', flex: 3, align: TextAlign.center),
-          _cabTxt('Preço SAP', flex: 2, align: TextAlign.right),
-          _cabTxt('kg sug', flex: 2, align: TextAlign.right),
-          const SizedBox(width: 6),
-          _cabTxt('Novo Preço', flex: 2, align: TextAlign.right),
-          const SizedBox(width: 6),
-          _cabTxt('Margem', flex: 2, align: TextAlign.right),
-          const SizedBox(width: 32), // botão remover
+          // Coluna de identidade
+          const SizedBox(width: 220),
+          const SizedBox(width: 16),
+
+          // ATUAL
+          Expanded(
+            flex: 5,
+            child: _cabecalhoSecao(
+              'ATUAL',
+              _corAtualLabel,
+              _corAtualBg,
+              _corAtualBorda,
+              ['PPV Caixa', 'PPV Unit', 'MC% Cliente', 'MC R\$', 'MC% Pole'],
+            ),
+          ),
+          const SizedBox(width: 10),
+
+          // NOVO
+          Expanded(
+            flex: 7,
+            child: _cabecalhoSecaoNovo(),
+          ),
+          const SizedBox(width: 10),
+
+          // OFERTA
+          Expanded(
+            flex: 3,
+            child: _cabecalhoSecao(
+              'OFERTA',
+              _corOfertaLabel,
+              _corOfertaBg,
+              _corOfertaBorda,
+              ['% Reajuste', 'PPV Unit', 'PPC'],
+            ),
+          ),
+
+          // Espaço do botão remover
+          const SizedBox(width: 40),
         ],
       ),
     );
   }
 
-  Widget _cabTxt(
-    String label, {
-    int flex = 1,
-    TextAlign align = TextAlign.left,
-  }) {
-    return Expanded(
-      flex: flex,
-      child: Text(
-        label,
-        textAlign: align,
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w700,
-          color: Colors.grey.shade500,
-          letterSpacing: 0.4,
-        ),
+  Widget _cabecalhoSecao(
+    String titulo,
+    Color labelColor,
+    Color bg,
+    Color borda,
+    List<String> cols,
+  ) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: borda),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            titulo,
+            style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.w800,
+              color: labelColor,
+              letterSpacing: 1.2,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Row(
+            children: cols.map((c) {
+              return Expanded(
+                child: Text(
+                  c,
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey.shade500,
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
       ),
     );
   }
 
+  Widget _cabecalhoSecaoNovo() {
+    final cols = ['PPV Caixa', 'PPV Unit', 'PPC Novo', 'MC% Cliente', 'MC R\$', 'MC% Pole', '% Reajuste'];
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: _corNovoBg,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: _corNovoBorda),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'NOVO',
+            style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.w800,
+              color: _corNovoLabel,
+              letterSpacing: 1.2,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Row(
+            children: cols.map((c) {
+              final isPpc = c == 'PPC Novo';
+              return Expanded(
+                child: Text(
+                  c,
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: isPpc ? FontWeight.w800 : FontWeight.w600,
+                    color: isPpc ? _laranja : Colors.grey.shade500,
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Legenda / filtros ──────────────────────────────────────────────────────
+
   Widget _legenda(List<MaterialPreco> lista) {
-    int ok = 0,
-        atencao = 0,
-        semMargem = 0,
-        semCpv = 0,
-        bloqueados = 0,
-        inativos = 0;
+    int ok = 0, atencao = 0, critico = 0, semMargem = 0, prejuizo = 0,
+        semCpv = 0, bloqueados = 0, inativos = 0;
+
     for (final m in lista) {
       if (m.bloqueado) bloqueados++;
-      if (m.inativo) inativos++;
+      if (m.inativo)   inativos++;
       switch (m.statusMargem) {
-        case 'ok':
-          ok++;
-          break;
-        case 'atencao':
-          atencao++;
-          break;
-        case 'sem margem':
-          semMargem++;
-          break;
-        default:
-          semCpv++;
+        case 'ok':         ok++;         break;
+        case 'atencao':    atencao++;    break;
+        case 'critico':    critico++;    break;
+        case 'prejuizo':   prejuizo++;   break;
+        case 'sem margem': semMargem++;  break;
+        default:           semCpv++;
       }
     }
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: _rowHPad, vertical: 10),
       decoration: BoxDecoration(
         color: Colors.grey.shade50,
         border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Text(
-            '${lista.length} materiais',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: Colors.grey.shade600,
+          Expanded(
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Text(
+                  '${lista.length} materiais',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.grey.shade600,
+                  ),
+                ),
+                if (ok > 0)         _legendaBtn('ok',         Colors.green,              '$ok ok'),
+                if (atencao > 0)    _legendaBtn('atencao',    Colors.orange,             '$atencao atenção'),
+                if (critico > 0)    _legendaBtn('critico',    Colors.deepOrange,         '$critico crítico'),
+                if (prejuizo > 0)   _legendaBtn('prejuizo',   Colors.red.shade900,       '$prejuizo prejuízo'),
+                if (semMargem > 0)  _legendaBtn('sem margem', Colors.red,                '$semMargem sem margem'),
+                if (semCpv > 0)     _legendaBtn('sem-cpv',    Colors.grey,               '$semCpv sem CPV'),
+                if (bloqueados > 0) _legendaBtn('bloqueado',  Colors.red.shade400,       '$bloqueados bloqueado', icon: Icons.lock_outline),
+                if (inativos > 0)   _legendaBtn('inativo',    Colors.orange.shade700,    '$inativos inativo',     icon: Icons.pause_circle_outline),
+              ],
             ),
           ),
-          const SizedBox(width: 16),
-          if (ok > 0) _legendaItem(Colors.green, '$ok ok'),
-          if (atencao > 0) ...[
-            const SizedBox(width: 14),
-            _legendaItem(Colors.orange, '$atencao atenção'),
-          ],
-          if (semMargem > 0) ...[
-            const SizedBox(width: 14),
-            _legendaItem(Colors.red, '$semMargem sem margem'),
-          ],
-          if (semCpv > 0) ...[
-            const SizedBox(width: 14),
-            _legendaItem(Colors.grey, '$semCpv sem CPV'),
-          ],
-          if (bloqueados > 0) ...[
-            const SizedBox(width: 14),
-            _legendaItem(
-              Colors.red.shade400,
-              '$bloqueados bloqueado',
-              icon: Icons.lock_outline,
-            ),
-          ],
-          if (inativos > 0) ...[
-            const SizedBox(width: 14),
-            _legendaItem(
-              Colors.orange.shade700,
-              '$inativos inativo',
-              icon: Icons.pause_circle_outline,
+          if (_filtroAtivo != null) ...[
+            const SizedBox(width: 12),
+            GestureDetector(
+              onTap: () => setState(() => _filtroAtivo = null),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.filter_alt_off, size: 14, color: Colors.grey.shade400),
+                  const SizedBox(width: 4),
+                  Text('Limpar filtro', style: TextStyle(fontSize: 12, color: Colors.grey.shade400)),
+                ],
+              ),
             ),
           ],
         ],
@@ -210,22 +343,39 @@ class _TabelaPrecosState extends State<TabelaPrecos> {
     );
   }
 
-  Widget _legendaItem(Color cor, String label, {IconData? icon}) {
-    return Row(
-      children: [
-        icon != null
-            ? Icon(icon, size: 8, color: cor)
-            : Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(color: cor, shape: BoxShape.circle),
-              ),
-        const SizedBox(width: 5),
-        Text(
-          label,
-          style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+  Widget _legendaBtn(String chave, Color cor, String label, {IconData? icon}) {
+    final ativo = _filtroAtivo == chave;
+    return GestureDetector(
+      onTap: () => _alternarFiltro(chave),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+        decoration: BoxDecoration(
+          color: ativo ? cor.withOpacity(0.10) : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: ativo ? cor : Colors.transparent),
         ),
-      ],
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            icon != null
+                ? Icon(icon, size: 10, color: cor)
+                : Container(
+                    width: 8, height: 8,
+                    decoration: BoxDecoration(color: cor, shape: BoxShape.circle),
+                  ),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: ativo ? cor : Colors.grey.shade600,
+                fontWeight: ativo ? FontWeight.w700 : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -234,16 +384,14 @@ class _TabelaPrecosState extends State<TabelaPrecos> {
 
 class _ItemMaterial extends StatefulWidget {
   final MaterialPreco material;
-  final ValueChanged<double> onPrecoChanged;
-  final ValueChanged<double> onPrecoConfirmado;
+  final VoidCallback onChanged;
   final VoidCallback onRemover;
   final bool isLast;
 
   const _ItemMaterial({
     super.key,
     required this.material,
-    required this.onPrecoChanged,
-    required this.onPrecoConfirmado,
+    required this.onChanged,
     required this.onRemover,
     this.isLast = false,
   });
@@ -253,46 +401,115 @@ class _ItemMaterial extends StatefulWidget {
 }
 
 class _ItemMaterialState extends State<_ItemMaterial> {
-  late final TextEditingController _precoCtrl;
-  late final FocusNode _precoFocus;
+  late final TextEditingController _ppcNovoCtrl;
+  late final TextEditingController _ppcOfertaCtrl;
+  late final TextEditingController _ppvUnitNovoCtrl;
+  late final TextEditingController _reajusteCtrl;
+
+  MaterialPreco get m => widget.material;
 
   @override
   void initState() {
     super.initState();
-    final m = widget.material;
-    _precoCtrl = TextEditingController(
-      text: m.novoPreco > 0 ? m.novoPreco.toStringAsFixed(2) : '',
+    _ppcNovoCtrl = TextEditingController(
+      text: m.ppcNovoOverride != null ? m.ppcNovoOverride!.toStringAsFixed(2) : '',
     );
-    _precoFocus = FocusNode()
-      ..addListener(() {
-        if (!_precoFocus.hasFocus) {
-          // Propaga ao perder foco (usuário rola a lista, toca em outro campo etc.)
-          final val =
-              double.tryParse(_precoCtrl.text.replaceAll(',', '.')) ?? 0;
-          widget.onPrecoChanged(val);
-        }
-      });
+    _ppcOfertaCtrl = TextEditingController(
+      text: m.ppcOfertaOverride != null ? m.ppcOfertaOverride!.toStringAsFixed(2) : '',
+    );
+    _ppvUnitNovoCtrl = TextEditingController(
+      text: m.ppvUnitNovoOverride != null ? m.ppvUnitNovoOverride!.toStringAsFixed(2) : '',
+    );
+    _reajusteCtrl = TextEditingController(
+      text: m.reajusteOverride != null
+          ? (m.reajusteOverride! * 100).toStringAsFixed(2)
+          : '',
+    );
   }
 
   @override
   void dispose() {
-    _precoCtrl.dispose();
-    _precoFocus.dispose();
+    _ppcNovoCtrl.dispose();
+    _ppcOfertaCtrl.dispose();
+    _ppvUnitNovoCtrl.dispose();
+    _reajusteCtrl.dispose();
     super.dispose();
   }
 
-  bool get _temRestricao =>
-      widget.material.bloqueado || widget.material.inativo;
+  // ── Handlers bidirecionais (inalterados) ──────────────────────────────────
 
-  Color get _corBordaEsquerda {
-    if (_temRestricao) return Colors.red.shade400;
-    return _corStatus(widget.material.statusMargem);
+  void _onPpcNovoChanged(String v) {
+    final val = double.tryParse(v.replaceAll(',', '.'));
+    m.ppcNovoOverride = val;
+    m.ppvUnitNovoOverride = null;
+    m.reajusteOverride = null;
+    if (val != null) {
+      final ppvNovo = m.ppvUnitNovo;
+      if (ppvNovo != null && _ppvUnitNovoCtrl.text.isEmpty) {
+        _ppvUnitNovoCtrl.text = ppvNovo.toStringAsFixed(2);
+      }
+    }
+    final ppvCx = m.ppvCxNovo;
+    if (ppvCx != null) m.novoPreco = ppvCx;
+    setState(() {});
+    widget.onChanged();
   }
+
+  void _onPpcNovoConfirmado(String v) {
+    _onPpcNovoChanged(v);
+    final ppvNovo = m.ppvUnitNovo;
+    if (ppvNovo != null) _ppvUnitNovoCtrl.text = ppvNovo.toStringAsFixed(2);
+    final reaj = m.reajustePct;
+    if (reaj != null) _reajusteCtrl.text = (reaj * 100).toStringAsFixed(2);
+  }
+
+  void _onPpvUnitNovoChanged(String v) {
+    final val = double.tryParse(v.replaceAll(',', '.'));
+    m.ppvUnitNovoOverride = val;
+    if (val != null) {
+      final ppcCalculado = m.ppcDePpvUnit(val);
+      m.ppcNovoOverride = ppcCalculado;
+      if (ppcCalculado != null) _ppcNovoCtrl.text = ppcCalculado.toStringAsFixed(2);
+    }
+    final ppvCx = m.ppvCxNovo;
+    if (ppvCx != null) m.novoPreco = ppvCx;
+    setState(() {});
+    widget.onChanged();
+  }
+
+  void _onReajusteChanged(String v) {
+    final val = double.tryParse(v.replaceAll(',', '.'));
+    m.reajusteOverride = val != null ? val / 100 : null;
+    if (val != null) {
+      final ppvNovo = m.ppvUnitDeReajuste(val / 100);
+      m.ppvUnitNovoOverride = ppvNovo;
+      if (ppvNovo != null) {
+        _ppvUnitNovoCtrl.text = ppvNovo.toStringAsFixed(2);
+        final ppcCalc = m.ppcDePpvUnit(ppvNovo);
+        m.ppcNovoOverride = ppcCalc;
+        if (ppcCalc != null) _ppcNovoCtrl.text = ppcCalc.toStringAsFixed(2);
+      }
+    }
+    final ppvCx = m.ppvCxNovo;
+    if (ppvCx != null) m.novoPreco = ppvCx;
+    setState(() {});
+    widget.onChanged();
+  }
+
+  void _onPpcOfertaChanged(String v) {
+    final val = double.tryParse(v.replaceAll(',', '.'));
+    m.ppcOfertaOverride = val;
+    setState(() {});
+    widget.onChanged();
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    final m = widget.material;
-    final status = m.statusMargem;
+    final temRestricao = m.bloqueado || m.inativo;
+    final statusNovo   = m.statusMargem;
+    final corLinha     = _corStatus(statusNovo);
 
     return Container(
       decoration: BoxDecoration(
@@ -300,199 +517,296 @@ class _ItemMaterialState extends State<_ItemMaterial> {
         border: Border(
           bottom: BorderSide(
             color: widget.isLast ? Colors.transparent : Colors.grey.shade100,
+            width: 1.5,
           ),
-          left: BorderSide(color: _corBordaEsquerda, width: 3),
+          left: BorderSide(color: corLinha, width: 4),
         ),
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            const SizedBox(width: 8),
-
-            // ── Código + Descrição (2 linhas compactas) ──────────────
-            Expanded(
-              flex: 5,
-              child: Tooltip(
-                richMessage: _tooltipContent(m),
-                preferBelow: true,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1E293B),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        Text(
-                          m.codigo,
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: Colors.grey.shade500,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                        if (_temRestricao) ...[
-                          const SizedBox(width: 6),
-                          _chipRestricao(m),
-                        ],
-                      ],
-                    ),
-                    Text(
-                      m.description,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (m.cpv != null)
-                      Text(
-                        'CPV R\$ ${m.cpv!.toStringAsFixed(2)}',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: Colors.grey.shade400,
-                        ),
-                      ),
-                  ],
-                ),
+      padding: const EdgeInsets.symmetric(
+        horizontal: _rowHPad,
+        vertical: _rowVPad,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // ── Identidade ─────────────────────────────────────────────
+          SizedBox(
+            width: 220,
+            child: Tooltip(
+              richMessage: _tooltipContent(m),
+              preferBelow: true,
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E293B),
+                borderRadius: BorderRadius.circular(10),
               ),
-            ),
-
-            // ── Vigência (só leitura — vem do SAP) ───────────────────
-            Expanded(
-              flex: 3,
-              child: Text(
-                m.vigenciaFormatada,
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
-              ),
-            ),
-
-            // ── Preço atual (SAP) ─────────────────────────────────────
-            Expanded(
-              flex: 2,
-              child: Text(
-                'R\$ ${m.precoAtual.toStringAsFixed(2)}',
-                textAlign: TextAlign.right,
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
-              ),
-            ),
-
-            const SizedBox(width: 6),
-
-            // ── kg_sug ───────────────────────────────────────────────
-            Expanded(
-              flex: 2,
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    m.kgSug != null
-                        ? 'R\$ ${m.kgSug!.toStringAsFixed(2)}'
-                        : '—',
-                    textAlign: TextAlign.right,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: m.kgSug != null
-                          ? const Color(0xFF0EA5E9)
-                          : Colors.grey.shade400,
-                      fontWeight: m.kgSug != null
-                          ? FontWeight.w600
-                          : FontWeight.normal,
-                    ),
-                  ),
-                  if (m.margemSugerida != null)
-                    Text(
-                      '${(m.margemSugerida! * 100).toStringAsFixed(1)}% sug',
-                      style: TextStyle(
-                        fontSize: 9,
-                        color: Colors.grey.shade400,
+                  Row(
+                    children: [
+                      Text(
+                        m.codigo,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey.shade400,
+                          fontFamily: 'monospace',
+                        ),
                       ),
+                      if (temRestricao) ...[
+                        const SizedBox(width: 6),
+                        _chipRestricao(m),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    m.description.isNotEmpty ? m.description : m.codigo,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: m.description.isNotEmpty
+                          ? Colors.black87
+                          : Colors.grey.shade400,
+                      fontStyle: m.description.isNotEmpty
+                          ? FontStyle.normal
+                          : FontStyle.italic,
                     ),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 2,
+                  ),
+                  if (m.cpv != null) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      'CPV R\$ ${m.cpv!.toStringAsFixed(2)}  ·  fator ${m.fatorConversao?.toStringAsFixed(1) ?? "—"}',
+                      style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
+                    ),
+                  ],
                 ],
               ),
             ),
+          ),
 
-            const SizedBox(width: 6),
+          const SizedBox(width: 16),
 
-            // ── Input novo preço ──────────────────────────────────────
-            Expanded(
-              flex: 2,
-              child: TextField(
-                controller: _precoCtrl,
-                focusNode: _precoFocus,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                textAlign: TextAlign.right,
-                style: const TextStyle(fontSize: 12),
-                decoration: InputDecoration(
-                  hintText: '0,00',
-                  prefixText: 'R\$ ',
-                  prefixStyle: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey.shade500,
-                  ),
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 8,
-                  ),
-                  filled: true,
-                  fillColor: const Color(0xFFFFF8F5),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(6),
-                    borderSide: BorderSide(color: Colors.grey.shade300),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(6),
-                    borderSide: BorderSide(color: Colors.grey.shade300),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(6),
-                    borderSide: const BorderSide(
-                      color: Color(0xFFFF6B00),
-                      width: 1.5,
-                    ),
-                  ),
-                ),
-                onChanged: (v) {
-                  // Apenas atualiza a UI localmente — NÃO chama notifyListeners a cada tecla
-                  setState(() {});
-                },
-                onSubmitted: (v) {
-                  final val = double.tryParse(v.replaceAll(',', '.')) ?? 0;
-                  widget.onPrecoConfirmado(val);
-                  FocusScope.of(context).unfocus();
-                },
-              ),
+          // ── Seção ATUAL ────────────────────────────────────────────
+          Expanded(flex: 5, child: _secaoAtual()),
+          const SizedBox(width: 10),
+
+          // ── Seção NOVO ─────────────────────────────────────────────
+          Expanded(flex: 7, child: _secaoNovo()),
+          const SizedBox(width: 10),
+
+          // ── Seção OFERTA ───────────────────────────────────────────
+          Expanded(flex: 3, child: _secaoOferta()),
+
+          // ── Botão remover ──────────────────────────────────────────
+          IconButton(
+            icon: Icon(Icons.delete_outline, size: 17, color: Colors.grey.shade300),
+            padding: const EdgeInsets.only(left: 8),
+            constraints: const BoxConstraints(minWidth: 32),
+            tooltip: 'Remover material',
+            onPressed: widget.onRemover,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Seção ATUAL ───────────────────────────────────────────────────────────
+
+  Widget _secaoAtual() {
+    return _SecaoBox(
+      bg: _corAtualBg,
+      borda: _corAtualBorda,
+      child: Row(
+        children: [
+          _Col(label: 'PPV CX',      value: 'R\$ ${m.precoAtual.toStringAsFixed(2)}'),
+          _Col(label: 'PPV Unit',    value: m.ppvUnitAtual != null ? 'R\$ ${m.ppvUnitAtual!.toStringAsFixed(2)}' : '—'),
+          _Col(
+            label: 'MC% Cliente',
+            value: m.margemClienteAtual != null
+                ? '${(m.margemClienteAtual! * 100).toStringAsFixed(1)}%'
+                : '—',
+            color: Colors.grey.shade500,
+          ),
+          _Col(
+            label: 'MC R\$',
+            value: m.mcReaisAtual != null ? 'R\$ ${m.mcReaisAtual!.toStringAsFixed(2)}' : '—',
+            color: Colors.grey.shade500,
+          ),
+          _Col(
+            label: 'MC% Pole',
+            value: m.mcPctAtual != null
+                ? '${(m.mcPctAtual! * 100).toStringAsFixed(1)}%'
+                : '—',
+            color: m.mcPctAtual != null ? _corMargem(m.mcPctAtual!, m) : Colors.grey.shade400,
+            bold: m.mcPctAtual != null,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Seção NOVO ────────────────────────────────────────────────────────────
+
+  Widget _secaoNovo() {
+    final ppvCxNovo  = m.ppvCxNovo;
+    final ppvUnitNovo = m.ppvUnitNovo;
+    final mcCliente  = m.margemClienteNovo;
+    final mcReais    = m.mcReaisNovo;
+    final mcPct      = m.mcPctNovo;
+    final reaj       = m.reajustePct;
+    final statusNovo = m.statusMargem;
+
+    return _SecaoBox(
+      bg: _corNovoBg,
+      borda: _corNovoBorda,
+      child: Row(
+        children: [
+          // PPV CX (readonly)
+          _Col(
+            label: 'PPV CX',
+            value: ppvCxNovo != null ? 'R\$ ${ppvCxNovo.toStringAsFixed(2)}' : '—',
+            color: ppvCxNovo != null ? Colors.black87 : Colors.grey.shade400,
+          ),
+          // PPV Unit (editável)
+          _ColInput(
+            label: 'PPV Unit',
+            controller: _ppvUnitNovoCtrl,
+            hint: ppvUnitNovo != null ? ppvUnitNovo.toStringAsFixed(2) : '0,00',
+            onChanged: _onPpvUnitNovoChanged,
+            onSubmitted: _onPpvUnitNovoChanged,
+          ),
+          // PPC Novo (ponto de entrada, destaque)
+          _ColInput(
+            label: 'PPC Novo',
+            controller: _ppcNovoCtrl,
+            hint: '0,00',
+            onChanged: _onPpcNovoChanged,
+            onSubmitted: _onPpcNovoConfirmado,
+            highlight: true,
+          ),
+          // MC% Cliente
+          _Col(
+            label: 'MC% Cliente',
+            value: mcCliente != null ? '${(mcCliente * 100).toStringAsFixed(1)}%' : '—',
+            color: Colors.grey.shade500,
+          ),
+          // MC R$
+          _Col(
+            label: 'MC R\$',
+            value: mcReais != null ? 'R\$ ${mcReais.toStringAsFixed(2)}' : '—',
+            color: Colors.grey.shade500,
+          ),
+          // MC% Pole + semáforo
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: mcPct != null
+                  ? _semaforoPct(mcPct, statusNovo)
+                  : _Col(label: 'MC% Pole', value: '—', color: Colors.grey.shade400),
             ),
+          ),
+          // % Reajuste (editável)
+          _ColInput(
+            label: '% Reajuste',
+            controller: _reajusteCtrl,
+            hint: reaj != null ? '${(reaj * 100).toStringAsFixed(2)}' : '0,00',
+            suffix: '%',
+            onChanged: _onReajusteChanged,
+            onSubmitted: _onReajusteChanged,
+            color: reaj != null
+                ? (reaj > 0 ? Colors.green.shade700 : reaj < 0 ? Colors.red : Colors.grey.shade600)
+                : null,
+          ),
+        ],
+      ),
+    );
+  }
 
-            const SizedBox(width: 6),
+  // ── Seção OFERTA ──────────────────────────────────────────────────────────
 
-            // ── Margem / semáforo ─────────────────────────────────────
-            Expanded(flex: 2, child: _semaforo(m)),
+  Widget _secaoOferta() {
+    final ppvUnitOferta = m.ppvUnitOferta;
+    final reajOferta = (m.ppcOfertaOverride != null &&
+            m.ppvUnitAtual != null &&
+            m.ppvUnitAtual! > 0)
+        ? (ppvUnitOferta != null ? (ppvUnitOferta / m.ppvUnitAtual!) - 1 : null)
+        : null;
 
-            // ── Botão remover ─────────────────────────────────────────
-            IconButton(
-              icon: Icon(
-                Icons.delete_outline,
-                size: 16,
-                color: Colors.grey.shade400,
+    return _SecaoBox(
+      bg: _corOfertaBg,
+      borda: _corOfertaBorda,
+      child: Row(
+        children: [
+          _Col(
+            label: '% Reajuste',
+            value: reajOferta != null ? '${(reajOferta * 100).toStringAsFixed(1)}%' : '—',
+            color: reajOferta != null
+                ? (reajOferta < 0 ? Colors.green.shade700 : Colors.orange.shade700)
+                : Colors.grey.shade400,
+          ),
+          _Col(
+            label: 'PPV Unit',
+            value: ppvUnitOferta != null ? 'R\$ ${ppvUnitOferta.toStringAsFixed(2)}' : '—',
+            color: ppvUnitOferta != null ? Colors.green.shade700 : Colors.grey.shade400,
+          ),
+          _ColInput(
+            label: 'PPC Oferta',
+            controller: _ppcOfertaCtrl,
+            hint: '0,00',
+            onChanged: _onPpcOfertaChanged,
+            onSubmitted: _onPpcOfertaChanged,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Semáforo de margem ────────────────────────────────────────────────────
+
+  Widget _semaforoPct(double mcPct, String status) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          'MC% Pole',
+          textAlign: TextAlign.right,
+          style: TextStyle(
+            fontSize: _labelFontSize,
+            color: Colors.grey.shade400,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(_iconeStatus(status), size: 13, color: _corStatus(status)),
+            const SizedBox(width: 3),
+            Flexible(
+              child: Text(
+                '${(mcPct * 100).toStringAsFixed(1)}%',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: _corStatus(status),
+                  fontWeight: FontWeight.bold,
+                  fontSize: _valorFontSize,
+                ),
               ),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              tooltip: 'Remover material',
-              onPressed: widget.onRemover,
             ),
           ],
         ),
-      ),
+        Text(
+          _labelStatus(status),
+          style: TextStyle(
+            fontSize: 10,
+            color: _corStatus(status).withOpacity(0.75),
+          ),
+        ),
+      ],
     );
   }
 
@@ -500,160 +814,257 @@ class _ItemMaterialState extends State<_ItemMaterial> {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (m.bloqueado)
-          _chip(
-            'BLOQUEADO',
-            Colors.red.shade700,
-            Colors.red.shade50,
-            Colors.red.shade200,
-          ),
-        if (m.bloqueado && m.inativo) const SizedBox(width: 4),
-        if (m.inativo)
-          _chip(
-            'INATIVO',
-            Colors.orange.shade800,
-            Colors.orange.shade50,
-            Colors.orange.shade200,
-          ),
+        if (m.bloqueado) _chip('BLOQ', Colors.red.shade700, Colors.red.shade50),
+        if (m.bloqueado && m.inativo) const SizedBox(width: 3),
+        if (m.inativo) _chip('INAT', Colors.orange.shade800, Colors.orange.shade50),
       ],
     );
   }
 
-  Widget _chip(
-    String label,
-    Color textColor,
-    Color bgColor,
-    Color borderColor,
-  ) {
+  Widget _chip(String label, Color textColor, Color bgColor) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
       decoration: BoxDecoration(
         color: bgColor,
-        borderRadius: BorderRadius.circular(3),
-        border: Border.all(color: borderColor),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: textColor.withOpacity(0.3)),
       ),
       child: Text(
         label,
-        style: TextStyle(
-          fontSize: 9,
-          color: textColor,
-          fontWeight: FontWeight.w600,
-        ),
+        style: TextStyle(fontSize: 9, color: textColor, fontWeight: FontWeight.w700),
       ),
     );
   }
 
   InlineSpan _tooltipContent(MaterialPreco m) {
-    final lines = <String>[];
-    lines.add('Código: ${m.codigo}');
-    if (m.clusterId != null) lines.add('Cluster: ${m.clusterId}');
-    if (m.cpv != null) lines.add('CPV: R\$ ${m.cpv!.toStringAsFixed(4)}');
-    if (m.kgSug != null)
-      lines.add('kg_sug SAP: R\$ ${m.kgSug!.toStringAsFixed(4)}');
-    if (m.margemFlat != null)
-      lines.add(
-        'Margem mín. (flat): ${(m.margemFlat! * 100).toStringAsFixed(1)}%',
-      );
-    if (m.margemOferta != null)
-      lines.add(
-        'Margem mín. (oferta): ${(m.margemOferta! * 100).toStringAsFixed(1)}%',
-      );
-    lines.add('Vigência: ${m.vigenciaFormatada}');
-    if (m.bloqueado) lines.add('⚠ Material bloqueado (LOEVM_KO)');
-    if (m.inativo) lines.add('⚠ Material inativo (KZNEP)');
+    final lines = <String>[
+      'Código: ${m.codigo}',
+      'Vigência: ${m.vigenciaFormatada}',
+      if (m.pesoCaixa != null && m.pesoUnidade != null)
+        'Caixa: ${m.pesoCaixa!.toStringAsFixed(3)} kg · Unit: ${m.pesoUnidade!.toStringAsFixed(3)} kg',
+      if (m.fatorConversao != null)
+        'Fator conversão: ${m.fatorConversao!.toStringAsFixed(1)} un/cx',
+      if (m.cpv != null)        'CPV: R\$${m.cpv!.toStringAsFixed(4)}',
+      if (m.kgSug != null)      'kg_sug SAP: R\$${m.kgSug!.toStringAsFixed(4)}',
+      if (m.margemFlat != null)  'Margem flat: ${(m.margemFlat! * 100).toStringAsFixed(1)}%',
+      if (m.margemOferta != null)'Margem oferta: ${(m.margemOferta! * 100).toStringAsFixed(1)}%',
+      if (m.clusterId != null)  'Cluster: ${m.clusterId}',
+      if (m.bloqueado)          '⚠ Material bloqueado (LOEVM_KO)',
+      if (m.inativo)            '⚠ Material inativo (KZNEP)',
+    ];
     return TextSpan(
       text: lines.join('\n'),
-      style: const TextStyle(fontSize: 11, color: Colors.white, height: 1.6),
+      style: const TextStyle(fontSize: 12, color: Colors.white, height: 1.7),
     );
   }
 
-  Widget _semaforo(MaterialPreco m) {
-    final margem = m.margemSugerida ?? m.margemReal;
-    final status = m.statusMargem;
-    final temNovoPreco = m.novoPreco > 0;
-    final variacaoPct = temNovoPreco && m.precoAtual > 0
-        ? ((m.novoPreco - m.precoAtual) / m.precoAtual) * 100
-        : null;
-    final textoMargem = margem != null
-        ? '${(margem * 100).toStringAsFixed(1)}%'
-        : variacaoPct != null
-        ? '${variacaoPct >= 0 ? '+' : ''}${variacaoPct.toStringAsFixed(1)}%'
-        : '—';
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            Icon(_iconeStatus(status), size: 13, color: _corStatus(status)),
-            const SizedBox(width: 3),
-            Text(
-              textoMargem,
-              style: TextStyle(
-                color: _corStatus(status),
-                fontWeight: FontWeight.bold,
-                fontSize: 13,
-              ),
-            ),
-          ],
-        ),
-        Text(
-          _labelStatus(status, m),
-          style: TextStyle(
-            fontSize: 9,
-            color: _corStatus(status).withOpacity(0.8),
-          ),
-        ),
-      ],
-    );
-  }
-
-  String _labelStatus(String status, MaterialPreco m) {
-    switch (status) {
-      case 'ok':
-        return 'margem ok';
-      case 'atencao':
-        return m.margemFlat != null
-            ? 'mín ${(m.margemFlat! * 100).toStringAsFixed(0)}%'
-            : 'atenção';
-      case 'sem margem':
-        return m.margemOferta != null
-            ? 'mín ${(m.margemOferta! * 100).toStringAsFixed(0)}%'
-            : 'sem margem';
-      default:
-        return m.novoPreco > 0 ? 'variação' : 'sem CPV';
-    }
+  Color _corMargem(double mc, MaterialPreco m) {
+    if (mc < 0) return Colors.red.shade900;
+    final mf = m.margemFlatEfetiva;
+    final mo = m.margemOfertaEfetiva;
+    if (mf != null && mc >= mf) return Colors.green;
+    if (mo != null && mc >= mo) return Colors.orange;
+    return Colors.deepOrange;
   }
 
   Color _corStatus(String status) {
     switch (status) {
-      case 'ok':
-        return Colors.green;
-      case 'atencao':
-        return Colors.orange;
-      case 'sem margem':
-        return Colors.red;
-      default:
-        return Colors.grey.shade400;
+      case 'ok':         return Colors.green;
+      case 'atencao':    return Colors.orange;
+      case 'critico':    return Colors.deepOrange;
+      case 'sem margem': return Colors.red;
+      case 'prejuizo':   return Colors.red.shade900;
+      default:           return Colors.grey.shade300;
     }
   }
 
   IconData _iconeStatus(String status) {
     switch (status) {
-      case 'ok':
-        return Icons.check_circle_outline;
-      case 'atencao':
-        return Icons.warning_amber_outlined;
-      case 'sem margem':
-        return Icons.cancel_outlined;
-      default:
-        return Icons.help_outline;
+      case 'ok':         return Icons.check_circle_outline;
+      case 'atencao':    return Icons.warning_amber_outlined;
+      case 'critico':    return Icons.trending_down;
+      case 'prejuizo':   return Icons.money_off;
+      case 'sem margem': return Icons.cancel_outlined;
+      default:           return Icons.help_outline;
+    }
+  }
+
+  String _labelStatus(String status) {
+    switch (status) {
+      case 'ok':         return 'margem ok';
+      case 'atencao':    return 'atenção';
+      case 'critico':    return 'abaixo política';
+      case 'prejuizo':   return 'prejuízo';
+      case 'sem margem': return 'sem margem';
+      default:           return 'sem CPV';
     }
   }
 }
 
-class FontFeature {
-  const FontFeature.tabularFigures();
+// ── Helpers de layout ─────────────────────────────────────────────────────────
+
+/// Container padrão de seção (ATUAL / NOVO / OFERTA)
+class _SecaoBox extends StatelessWidget {
+  final Color bg;
+  final Color borda;
+  final Widget child;
+
+  const _SecaoBox({
+    required this.bg,
+    required this.borda,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: borda),
+      ),
+      child: child,
+    );
+  }
+}
+
+/// Coluna de valor somente leitura: label em cima, valor embaixo
+class _Col extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color? color;
+  final bool bold;
+
+  const _Col({
+    required this.label,
+    required this.value,
+    this.color,
+    this.bold = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: _labelFontSize,
+                color: Colors.grey.shade400,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: _valorFontSize,
+                color: color ?? Colors.grey.shade700,
+                fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Coluna de input editável: label em cima, campo embaixo
+class _ColInput extends StatelessWidget {
+  final String label;
+  final TextEditingController controller;
+  final String hint;
+  final ValueChanged<String> onChanged;
+  final ValueChanged<String> onSubmitted;
+  final String? suffix;
+  final bool highlight;
+  final Color? color;
+
+  const _ColInput({
+    required this.label,
+    required this.controller,
+    required this.hint,
+    required this.onChanged,
+    required this.onSubmitted,
+    this.suffix,
+    this.highlight = false,
+    this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: _labelFontSize,
+                color: highlight ? _laranja.withOpacity(0.8) : Colors.grey.shade400,
+                fontWeight: highlight ? FontWeight.w700 : FontWeight.normal,
+              ),
+            ),
+            const SizedBox(height: 4),
+            TextField(
+              controller: controller,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: _inputFontSize,
+                color: color ?? (highlight ? _laranja : Colors.black87),
+                fontWeight: highlight ? FontWeight.w700 : FontWeight.w500,
+              ),
+              decoration: InputDecoration(
+                hintText: hint,
+                hintStyle: TextStyle(fontSize: 12, color: Colors.grey.shade400),
+                suffixText: suffix,
+                suffixStyle: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                isDense: true,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+                filled: true,
+                fillColor: highlight
+                    ? const Color(0xFFFFF3E8)
+                    : Colors.white.withOpacity(0.9),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: BorderSide(
+                    color: highlight
+                        ? _laranja.withOpacity(0.4)
+                        : Colors.grey.shade300,
+                  ),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: BorderSide(
+                    color: highlight ? _laranja : _azulInfo,
+                    width: 1.5,
+                  ),
+                ),
+              ),
+              onChanged: onChanged,
+              onSubmitted: onSubmitted,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
