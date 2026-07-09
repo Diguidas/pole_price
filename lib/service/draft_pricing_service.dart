@@ -48,7 +48,8 @@ class DraftPricingService {
       supabase
           .from('price_draft_items')
           .select(
-            'product_id, old_price, new_price, datab, datbi, origem_material',
+            'product_id, old_price, new_price, datab, datbi, origem_material, '
+            'cpv, kg_sug, ppc_novo, ppc_oferta, margem_flat_override, margem_oferta_override',
           )
           .eq('draft_id', draftId),
       supabase
@@ -75,6 +76,15 @@ class DraftPricingService {
     final Map<String, String> descricaoPorPid =
         {}; // preenchido abaixo se disponível
 
+    // Congelados no draft — usados para reconstruir o card completo
+    // (Atual/Novo/Oferta) na tela de histórico.
+    final Map<String, double> cpvPorPid = {};
+    final Map<String, double> kgSugPorPid = {};
+    final Map<String, double> ppcNovoPorPid = {};
+    final Map<String, double> ppcOfertaPorPid = {};
+    final Map<String, double> margemFlatOverridePorPid = {};
+    final Map<String, double> margemOfertaOverridePorPid = {};
+
     for (final item in itensRes) {
       final pid = item['product_id']?.toString();
       if (pid == null) continue;
@@ -82,19 +92,100 @@ class DraftPricingService {
       final op = _toDouble(item['old_price']);
       if (np != null) precoNovoPorPid[pid] = np;
       if (op != null) precoAntigoPorPid[pid] = op;
+
+      final cpv = _toDouble(item['cpv']);
+      if (cpv != null) cpvPorPid[pid] = cpv;
+      final kgSug = _toDouble(item['kg_sug']);
+      if (kgSug != null) kgSugPorPid[pid] = kgSug;
+      final ppcNovo = _toDouble(item['ppc_novo']);
+      if (ppcNovo != null) ppcNovoPorPid[pid] = ppcNovo;
+      final ppcOferta = _toDouble(item['ppc_oferta']);
+      if (ppcOferta != null) ppcOfertaPorPid[pid] = ppcOferta;
+      final mfOverride = _toDouble(item['margem_flat_override']);
+      if (mfOverride != null) margemFlatOverridePorPid[pid] = mfOverride;
+      final moOverride = _toDouble(item['margem_oferta_override']);
+      if (moOverride != null) margemOfertaOverridePorPid[pid] = moOverride;
     }
+
+    // Peso/Ded%/DV%/margens da política — não são congelados por item do
+    // draft, então usamos o cadastro/custo atuais para montar o card.
+    final Map<String, double> pesoUnidadePorPid = {};
+    final Map<String, double> pesoCaixaPorPid = {};
+    final Map<String, double> dedPctPorPid = {};
+    final Map<String, double> dvPctPorPid = {};
+    double? margemFlatPolitica;
+    double? margemOfertaPolitica;
 
     // Busca descrições dos produtos editados (products table, não materials)
     if (precoNovoPorPid.isNotEmpty) {
       final pids = precoNovoPorPid.keys.toList();
-      final prodsRes = await supabase
-          .from('products')
-          .select('code, name')
-          .inFilter('code', pids);
-      for (final p in prodsRes as List) {
+      final futurasExtras = await Future.wait<dynamic>([
+        supabase.from('products').select('code, name').inFilter('code', pids),
+        supabase
+            .from('materials')
+            .select('material_code, peso_unidade, peso_caixa')
+            .inFilter('material_code', pids),
+        supabase
+            .from('product_costs')
+            .select('product_code, ded_pct, dv_pct, period')
+            .inFilter('product_code', pids),
+        if (masterListId != null)
+          supabase
+              .from('price_lists')
+              .select('policy_id, pricing_policies(margem_flat, margem_oferta)')
+              .eq('pltyp', masterListId)
+              .maybeSingle()
+        else
+          Future<dynamic>.value(null),
+      ]);
+
+      for (final p in futurasExtras[0] as List) {
         final code = p['code']?.toString();
         final name = p['name']?.toString();
         if (code != null && name != null) descricaoPorPid[code] = name;
+      }
+
+      for (final p in futurasExtras[1] as List) {
+        final code = p['material_code']?.toString();
+        if (code == null) continue;
+        final pu = _toDouble(p['peso_unidade']);
+        final pc = _toDouble(p['peso_caixa']);
+        if (pu != null) pesoUnidadePorPid[code] = pu;
+        if (pc != null) pesoCaixaPorPid[code] = pc;
+      }
+
+      // 'period' pode conter formatos legados fora do padrão AAAAMM — só
+      // considera períodos de 6 dígitos ao escolher o mais recente.
+      final periodoRegex = RegExp(r'^\d{6}$');
+      final melhorPeriodoPorPid = <String, String>{};
+      for (final c in futurasExtras[2] as List) {
+        final code = c['product_code']?.toString();
+        final periodo = c['period']?.toString();
+        if (code == null ||
+            periodo == null ||
+            !periodoRegex.hasMatch(periodo)) {
+          continue;
+        }
+        final atual = melhorPeriodoPorPid[code];
+        if (atual == null || periodo.compareTo(atual) > 0) {
+          melhorPeriodoPorPid[code] = periodo;
+        }
+      }
+      for (final c in futurasExtras[2] as List) {
+        final code = c['product_code']?.toString();
+        final periodo = c['period']?.toString();
+        if (code == null || periodo != melhorPeriodoPorPid[code]) continue;
+        final ded = _toDouble(c['ded_pct']);
+        final dv = _toDouble(c['dv_pct']);
+        if (ded != null) dedPctPorPid[code] = ded;
+        if (dv != null) dvPctPorPid[code] = dv;
+      }
+
+      final listRes = futurasExtras[3] as Map<String, dynamic>?;
+      if (listRes != null) {
+        final policy = listRes['pricing_policies'] as Map<String, dynamic>?;
+        margemFlatPolitica = _toDouble(policy?['margem_flat']);
+        margemOfertaPolitica = _toDouble(policy?['margem_oferta']);
       }
     }
 
@@ -119,6 +210,18 @@ class DraftPricingService {
           precoNovo: precoNovo,
           origem: 'Ajuste manual',
           foiEditado: precoNovo != precoAntigo,
+          cpv: cpvPorPid[pid],
+          kgSug: kgSugPorPid[pid],
+          ppcNovo: ppcNovoPorPid[pid],
+          ppcOferta: ppcOfertaPorPid[pid],
+          margemFlatOverride: margemFlatOverridePorPid[pid],
+          margemOfertaOverride: margemOfertaOverridePorPid[pid],
+          pesoUnidade: pesoUnidadePorPid[pid],
+          pesoCaixa: pesoCaixaPorPid[pid],
+          dedPct: dedPctPorPid[pid],
+          dvPct: dvPctPorPid[pid],
+          margemFlat: margemFlatPolitica,
+          margemOferta: margemOfertaPolitica,
         ),
       );
     }
@@ -234,6 +337,18 @@ class DraftPricingService {
             precoNovo: precoNovo,
             origem: origemStr,
             foiEditado: precoNovo != precoAntigoMae,
+            cpv: cpvPorPid[pid],
+            kgSug: kgSugPorPid[pid],
+            ppcNovo: ppcNovoPorPid[pid],
+            ppcOferta: ppcOfertaPorPid[pid],
+            margemFlatOverride: margemFlatOverridePorPid[pid],
+            margemOfertaOverride: margemOfertaOverridePorPid[pid],
+            pesoUnidade: pesoUnidadePorPid[pid],
+            pesoCaixa: pesoCaixaPorPid[pid],
+            dedPct: dedPctPorPid[pid],
+            dvPct: dvPctPorPid[pid],
+            margemFlat: margemFlatPolitica,
+            margemOferta: margemOfertaPolitica,
           ),
         );
       }
@@ -251,7 +366,7 @@ class DraftPricingService {
     final itemsRes = await supabase
         .from('price_draft_items')
         .select(
-          'product_id, new_price, datab, datbi, konwa, kmein, krech, mxwrt, sap_status',
+          'product_id, new_price, datab, datbi, konwa, kmein, krech, mxwrt, sap_status, ppc_novo',
         )
         .eq('draft_id', draftId);
 
@@ -305,12 +420,51 @@ class DraftPricingService {
       );
     }
 
+    await _gravarPpcHistorico(draftId, pltyp, targetsRes, items);
+
     await supabase
         .from('price_drafts')
         .update({'status': 'approved'})
         .eq('id', draftId);
 
     return items.length;
+  }
+
+  /// Congela o PPC usado neste ciclo — vira o "PPC Atual" na próxima vez
+  /// que essa lista (mãe e filhas) for aberta na Gestão de Preços.
+  Future<void> _gravarPpcHistorico(
+    String draftId,
+    String pltyp,
+    List targetsRes,
+    List items,
+  ) async {
+    final pltyps = <String>{
+      pltyp,
+      ...targetsRes.map((t) => t['target_list_id']?.toString() ?? ''),
+    }..removeWhere((p) => p.isEmpty);
+
+    final rows = <Map<String, dynamic>>[];
+    for (final item in items) {
+      final ppcNovo = _toDouble(item['ppc_novo']);
+      if (ppcNovo == null) continue;
+      final pid = item['product_id']?.toString();
+      if (pid == null) continue;
+      for (final p in pltyps) {
+        rows.add({
+          'pltyp': p,
+          'product_code': pid,
+          'ppc': ppcNovo,
+          'vigencia_datab': item['datab'],
+          'vigencia_datbi': item['datbi'],
+          'draft_id': draftId,
+        });
+      }
+    }
+
+    if (rows.isEmpty) return;
+    await supabase
+        .from('ppc_historico')
+        .upsert(rows, onConflict: 'pltyp,product_code');
   }
 
   List<Map<String, dynamic>> _montarSapItems(

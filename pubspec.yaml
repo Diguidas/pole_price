@@ -17,6 +17,8 @@ dependencies:
   url_launcher: ^6.3.2
   file_picker: ^11.0.2
   html: ^0.15.6
+  archive: ^4.0.7
+  xml: ^6.6.1
 
 dev_dependencies:
   flutter_test:

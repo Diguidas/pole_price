@@ -31,12 +31,11 @@ class PriceService {
         .eq('id', listId)
         .single();
 
-    final periodFuture = supabase
-        .from('product_costs')
-        .select('period')
-        .order('period', ascending: false)
-        .limit(1)
-        .maybeSingle();
+    // Não ordena por 'period' direto: a coluna é texto e convive com formatos
+    // legados ('MANUAL', '2025.05') que "vencem" um período real (ex: '202607')
+    // em ordenação alfabética. Só considera períodos no formato AAAAMM (6
+    // dígitos) e escolhe o maior numericamente.
+    final periodFuture = supabase.from('product_costs').select('period');
 
     // ← Adicionado: peso_unidade, peso_caixa, unidade_venda
     final matsFuture = supabase
@@ -51,7 +50,7 @@ class PriceService {
     ]);
 
     final listRes = round1[0] as Map<String, dynamic>;
-    final periodRes = round1[1] as Map<String, dynamic>?;
+    final periodRes = round1[1] as List;
     final matsRes = round1[2] as List;
 
     final margemFlat = listRes['margem_flat'] != null
@@ -60,7 +59,13 @@ class PriceService {
     final margemOferta = listRes['margem_oferta'] != null
         ? double.tryParse(listRes['margem_oferta'].toString())
         : null;
-    final latestPeriod = periodRes?['period'] as String?;
+
+    final periodoRegex = RegExp(r'^\d{6}$');
+    final latestPeriod = periodRes
+        .map((r) => r['period']?.toString())
+        .whereType<String>()
+        .where((p) => periodoRegex.hasMatch(p))
+        .fold<String?>(null, (max, p) => (max == null || p.compareTo(max) > 0) ? p : max);
 
     if (matsRes.isEmpty) return [];
 
@@ -69,12 +74,14 @@ class PriceService {
         .whereType<String>()
         .toList();
 
+    // classification não é mais usada como filtro: desde que o import de
+    // custos passou a vir só da planilha (CPV/Ded%/DV% por período), toda
+    // linha de product_costs do período mais recente é válida.
     final Future<dynamic> cpvFuture = latestPeriod != null && codes.isNotEmpty
         ? supabase
               .from('product_costs')
-              .select('product_code, cost_value')
+              .select('product_code, cost_value, ded_pct, dv_pct')
               .eq('period', latestPeriod)
-              .eq('classification', 'Real')
               .inFilter('product_code', codes)
         : Future<dynamic>.value(<dynamic>[]);
 
@@ -91,12 +98,23 @@ class PriceService {
     final prodRes = round2[1] as List;
 
     final Map<String, double> cpvMap = {};
+    final Map<String, double> dedMap = {};
+    final Map<String, double> dvMap = {};
     for (final row in cpvRes) {
       final code = row['product_code']?.toString();
+      if (code == null) continue;
       final cost = row['cost_value'] != null
           ? double.tryParse(row['cost_value'].toString())
           : null;
-      if (code != null && cost != null) cpvMap[code] = cost;
+      if (cost != null) cpvMap[code] = cost;
+      final ded = row['ded_pct'] != null
+          ? double.tryParse(row['ded_pct'].toString())
+          : null;
+      if (ded != null) dedMap[code] = ded;
+      final dv = row['dv_pct'] != null
+          ? double.tryParse(row['dv_pct'].toString())
+          : null;
+      if (dv != null) dvMap[code] = dv;
     }
 
     final Map<String, String> clusterMap = {};
@@ -116,6 +134,8 @@ class PriceService {
         description: m['description'] ?? '',
         precoAtual: precoTratado,
         cpv: cpvMap[code],
+        dedPct: dedMap[code],
+        dvPct: dvMap[code],
         margemFlat: margemFlat,
         margemOferta: margemOferta,
         clusterId: clusterMap[code],

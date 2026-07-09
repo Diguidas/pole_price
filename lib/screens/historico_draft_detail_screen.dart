@@ -1,6 +1,8 @@
 // historico_draft_detail_screen.dart
 import 'package:flutter/material.dart';
+import 'package:pole_price/models/material_draft_preview.dart';
 import 'package:pole_price/service/draft_pricing_service.dart';
+import 'package:pole_price/widgets/preco/material_preco_card_view.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class HistoricoDraftDetailScreen extends StatefulWidget {
@@ -49,6 +51,7 @@ class _HistoricoDraftDetailScreenState
   String _erro = '';
 
   List<Map<String, dynamic>> _materiais = [];
+  Map<String, MaterialDraftPreview> _previewByKey = {};
   String _resumo = '';
   String _filtroTab = 'todos';
   String _busca = '';
@@ -70,6 +73,9 @@ class _HistoricoDraftDetailScreenState
       final preview = await _draftService.buildPreview(widget.draftId);
       setState(() {
         _materiais = preview.materiais.map((m) => m.toRowMap()).toList();
+        _previewByKey = {
+          for (final m in preview.materiais) '${m.productId}|${m.listaId}': m,
+        };
         _resumo = preview.resumo;
         for (final m in _materiais) {
           _listasExpandidas.add(m['lista_id'] as String);
@@ -82,9 +88,18 @@ class _HistoricoDraftDetailScreenState
     }
   }
 
-  (String label, Color bg, Color fg) get _statusConfig => switch (widget.status) {
-        'approved' => ('Aprovado', const Color(0xFFECFDF5), const Color(0xFF047857)),
-        'rejected' => ('Rejeitado', const Color(0xFFFFF1F2), const Color(0xFFB91C1C)),
+  (String label, Color bg, Color fg) get _statusConfig =>
+      switch (widget.status) {
+        'approved' => (
+          'Aprovado',
+          const Color(0xFFECFDF5),
+          const Color(0xFF047857),
+        ),
+        'rejected' => (
+          'Rejeitado',
+          const Color(0xFFFFF1F2),
+          const Color(0xFFB91C1C),
+        ),
         _ => ('Pendente', const Color(0xFFFFF7ED), const Color(0xFFC2410C)),
       };
 
@@ -97,16 +112,15 @@ class _HistoricoDraftDetailScreenState
   }
 
   List<MapEntry<String, List<Map<String, dynamic>>>> _gruposOrdenados() {
-    return _agruparPorLista().entries.toList()
-      ..sort((a, b) {
-        final aMae = a.value.first['tipo_lista'] == 'mae';
-        final bMae = b.value.first['tipo_lista'] == 'mae';
-        if (aMae && !bMae) return -1;
-        if (!aMae && bMae) return 1;
-        return a.value.first['lista_nome']
-            .toString()
-            .compareTo(b.value.first['lista_nome'].toString());
-      });
+    return _agruparPorLista().entries.toList()..sort((a, b) {
+      final aMae = a.value.first['tipo_lista'] == 'mae';
+      final bMae = b.value.first['tipo_lista'] == 'mae';
+      if (aMae && !bMae) return -1;
+      if (!aMae && bMae) return 1;
+      return a.value.first['lista_nome'].toString().compareTo(
+        b.value.first['lista_nome'].toString(),
+      );
+    });
   }
 
   List<Map<String, dynamic>> _filtrar(List<Map<String, dynamic>> grupo) {
@@ -140,19 +154,20 @@ class _HistoricoDraftDetailScreenState
     final excecoes = _materiais
         .where((m) => _statusLabelItem(m) == 'Exceção manual')
         .length;
-    final listas = _agruparPorLista()
-        .values
+    final listas = _agruparPorLista().values
         .where((g) => g.first['tipo_lista'] == 'filha')
         .length;
     return _KpisSummary(
-        total: total,
-        alterados: alterados,
-        semAlteracao: total - alterados,
-        excecoes: excecoes,
-        listasFilhas: listas);
+      total: total,
+      alterados: alterados,
+      semAlteracao: total - alterados,
+      excecoes: excecoes,
+      listasFilhas: listas,
+    );
   }
 
-  int _materialsFiltradosTotal() => _materiais.where((m) => m['foi_editado'] == true).length;
+  int _materialsFiltradosTotal() =>
+      _materiais.where((m) => m['foi_editado'] == true).length;
 
   @override
   Widget build(BuildContext context) {
@@ -177,12 +192,28 @@ class _HistoricoDraftDetailScreenState
                   children: [
                     GestureDetector(
                       onTap: () => Navigator.of(context).pop(),
-                      child: const Text('Histórico',
-                          style: TextStyle(fontSize: 12, color: _slate600, fontWeight: FontWeight.w600)),
+                      child: const Text(
+                        'Histórico',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: _slate600,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
-                    const Icon(Icons.chevron_right_rounded, size: 16, color: _slate400),
-                    Text(widget.nomeLista,
-                        style: const TextStyle(fontSize: 12, color: _slate900, fontWeight: FontWeight.w700)),
+                    const Icon(
+                      Icons.chevron_right_rounded,
+                      size: 16,
+                      color: _slate400,
+                    ),
+                    Text(
+                      widget.nomeLista,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: _slate900,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -203,35 +234,62 @@ class _HistoricoDraftDetailScreenState
                         children: [
                           Text(
                             widget.nomeLista,
-                            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: _slate900, letterSpacing: -0.5),
+                            style: const TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w900,
+                              color: _slate900,
+                              letterSpacing: -0.5,
+                            ),
                           ),
                           const SizedBox(height: 6),
                           Wrap(
                             spacing: 16,
                             runSpacing: 6,
                             children: [
-                              _metaChip(Icons.calendar_today_outlined, 'Criado em ${widget.createdAt}'),
-                              if (widget.createdByEmail != null && widget.createdByEmail!.isNotEmpty)
-                                _metaChip(Icons.person_outline_rounded, widget.createdByEmail!),
-                              if (widget.reviewedByEmail != null && widget.reviewedByEmail!.isNotEmpty) ...[
-                                _metaChip(Icons.rate_review_outlined, '${_reviewLabel(widget.status)} em ${widget.reviewedAt}'),
-                                _metaChip(Icons.verified_user_outlined, widget.reviewedByEmail!),
+                              _metaChip(
+                                Icons.calendar_today_outlined,
+                                'Criado em ${widget.createdAt}',
+                              ),
+                              if (widget.createdByEmail != null &&
+                                  widget.createdByEmail!.isNotEmpty)
+                                _metaChip(
+                                  Icons.person_outline_rounded,
+                                  widget.createdByEmail!,
+                                ),
+                              if (widget.reviewedByEmail != null &&
+                                  widget.reviewedByEmail!.isNotEmpty) ...[
+                                _metaChip(
+                                  Icons.rate_review_outlined,
+                                  '${_reviewLabel(widget.status)} em ${widget.reviewedAt}',
+                                ),
+                                _metaChip(
+                                  Icons.verified_user_outlined,
+                                  widget.reviewedByEmail!,
+                                ),
                               ],
                               // ── Vigência ──────────────────────────────
-                              if (_fmtSapDate(widget.vigenciaDatab) != null || _fmtSapDate(widget.vigenciaDatbi) != null)
+                              if (_fmtSapDate(widget.vigenciaDatab) != null ||
+                                  _fmtSapDate(widget.vigenciaDatbi) != null)
                                 _metaChip(
                                   Icons.date_range_outlined,
                                   () {
-                                    final ini = _fmtSapDate(widget.vigenciaDatab);
-                                    final fim = _fmtSapDate(widget.vigenciaDatbi);
-                                    if (ini != null && fim != null) return 'Vigência: $ini → $fim';
-                                    if (ini != null) return 'Vigência a partir de $ini';
+                                    final ini = _fmtSapDate(
+                                      widget.vigenciaDatab,
+                                    );
+                                    final fim = _fmtSapDate(
+                                      widget.vigenciaDatbi,
+                                    );
+                                    if (ini != null && fim != null)
+                                      return 'Vigência: $ini → $fim';
+                                    if (ini != null)
+                                      return 'Vigência a partir de $ini';
                                     return 'Vigência até $fim';
                                   }(),
                                   color: const Color(0xFF0369A1),
                                 ),
                               // ── Justificativa ─────────────────────────
-                              if (widget.justificativa != null && widget.justificativa!.trim().isNotEmpty)
+                              if (widget.justificativa != null &&
+                                  widget.justificativa!.trim().isNotEmpty)
                                 _metaChip(
                                   Icons.notes_rounded,
                                   widget.justificativa!.trim(),
@@ -244,11 +302,22 @@ class _HistoricoDraftDetailScreenState
                     ),
                     const SizedBox(width: 16),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                      decoration: BoxDecoration(color: statusBg, borderRadius: BorderRadius.circular(8)),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: statusBg,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                       child: Text(
                         statusLabel,
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: statusFg, letterSpacing: 0.3),
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: statusFg,
+                          letterSpacing: 0.3,
+                        ),
                       ),
                     ),
                   ],
@@ -258,10 +327,12 @@ class _HistoricoDraftDetailScreenState
           ),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator(color: _laranja))
+                ? const Center(
+                    child: CircularProgressIndicator(color: _laranja),
+                  )
                 : _erro.isNotEmpty
-                    ? _erroWidget()
-                    : _corpo(),
+                ? _erroWidget()
+                : _corpo(),
           ),
         ],
       ),
@@ -305,8 +376,11 @@ class _HistoricoDraftDetailScreenState
               filtrar: _filtrar,
               busca: _busca,
               filtroTab: _filtroTab,
+              previewByKey: _previewByKey,
               onToggle: (k) => setState(() {
-                _listasExpandidas.contains(k) ? _listasExpandidas.remove(k) : _listasExpandidas.add(k);
+                _listasExpandidas.contains(k)
+                    ? _listasExpandidas.remove(k)
+                    : _listasExpandidas.add(k);
               }),
             ),
           ),
@@ -320,16 +394,36 @@ class _HistoricoDraftDetailScreenState
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.error_outline_rounded, size: 44, color: Colors.red.shade400),
+          Icon(
+            Icons.error_outline_rounded,
+            size: 44,
+            color: Colors.red.shade400,
+          ),
           const SizedBox(height: 12),
-          const Text('Erro ao carregar detalhes', style: TextStyle(fontWeight: FontWeight.w800, color: _slate900, fontSize: 16)),
+          const Text(
+            'Erro ao carregar detalhes',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              color: _slate900,
+              fontSize: 16,
+            ),
+          ),
           const SizedBox(height: 4),
           Text(_erro, style: const TextStyle(fontSize: 12, color: _slate600)),
           const SizedBox(height: 16),
           ElevatedButton(
             onPressed: _carregar,
-            style: ElevatedButton.styleFrom(backgroundColor: _laranja, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-            child: const Text('Tentar novamente', style: TextStyle(fontWeight: FontWeight.w700)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _laranja,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text(
+              'Tentar novamente',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
           ),
         ],
       ),
@@ -343,16 +437,19 @@ class _HistoricoDraftDetailScreenState
       children: [
         Icon(icon, size: 14, color: c),
         const SizedBox(width: 6),
-        Text(label, style: TextStyle(fontSize: 12, color: c, fontWeight: FontWeight.w500)),
+        Text(
+          label,
+          style: TextStyle(fontSize: 12, color: c, fontWeight: FontWeight.w500),
+        ),
       ],
     );
   }
 
   String _reviewLabel(String status) => switch (status) {
-        'approved' => 'Aprovado',
-        'rejected' => 'Rejeitado',
-        _ => 'Revisado',
-      };
+    'approved' => 'Aprovado',
+    'rejected' => 'Rejeitado',
+    _ => 'Revisado',
+  };
 
   /// Converte YYYYMMDD → DD/MM/AAAA. Retorna null se inválido ou vazio.
   String? _fmtSapDate(String? s) {
@@ -387,18 +484,56 @@ class _KpiRow extends StatelessWidget {
 
     return Row(
       children: [
-        Expanded(child: _card(Icons.inventory_2_outlined, 'Total', '${kpis.total}', 'materiais avaliados', Colors.blue.shade600)),
+        Expanded(
+          child: _card(
+            Icons.inventory_2_outlined,
+            'Total',
+            '${kpis.total}',
+            'materiais avaliados',
+            Colors.blue.shade600,
+          ),
+        ),
         const SizedBox(width: 12),
-        Expanded(child: _card(Icons.edit_document, 'Alterados', '${kpis.alterados}', '${pctAlt.toStringAsFixed(1)}% do lote', _laranja)),
+        Expanded(
+          child: _card(
+            Icons.edit_document,
+            'Alterados',
+            '${kpis.alterados}',
+            '${pctAlt.toStringAsFixed(1)}% do lote',
+            _laranja,
+          ),
+        ),
         const SizedBox(width: 12),
-        Expanded(child: _card(Icons.remove_circle_outline_rounded, 'Sem alteração', '${kpis.semAlteracao}', '${pctSem.toStringAsFixed(1)}% mantidos', _slate600)),
+        Expanded(
+          child: _card(
+            Icons.remove_circle_outline_rounded,
+            'Sem alteração',
+            '${kpis.semAlteracao}',
+            '${pctSem.toStringAsFixed(1)}% mantidos',
+            _slate600,
+          ),
+        ),
         const SizedBox(width: 12),
-        Expanded(child: _card(Icons.rule_folder_outlined, 'Exceções', '${kpis.excecoes}', '${kpis.listasFilhas} sub-listas filhas', Colors.purple.shade600)),
+        Expanded(
+          child: _card(
+            Icons.rule_folder_outlined,
+            'Exceções',
+            '${kpis.excecoes}',
+            '${kpis.listasFilhas} sub-listas filhas',
+            Colors.purple.shade600,
+          ),
+        ),
       ],
     );
   }
 
-  static Widget _card(IconData icon, String label, String valor, String sub, Color cor) {
+  static Widget _card(
+    IconData icon,
+    String label,
+    String valor,
+    String sub,
+    Color cor,
+  ) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
@@ -409,14 +544,41 @@ class _KpiRow extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: [
-            Icon(icon, size: 16, color: cor),
-            const SizedBox(width: 8),
-            Expanded(child: Text(label, style: const TextStyle(fontSize: 11, color: _slate600, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
-          ]),
+          Row(
+            children: [
+              Icon(icon, size: 16, color: cor),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: _slate600,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 6),
-          Text(valor, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: cor, letterSpacing: -0.5)),
-          Text(sub, style: const TextStyle(fontSize: 10, color: _slate600, fontWeight: FontWeight.w500)),
+          Text(
+            valor,
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w900,
+              color: cor,
+              letterSpacing: -0.5,
+            ),
+          ),
+          Text(
+            sub,
+            style: const TextStyle(
+              fontSize: 10,
+              color: _slate600,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
         ],
       ),
     );
@@ -444,23 +606,47 @@ class _RegrasBox extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(children: [
-            Icon(Icons.info_outline_rounded, size: 16, color: _slate600),
-            const SizedBox(width: 8),
-            Text('Parâmetros e Regras de Negócio Aplicadas', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: _slate900)),
-          ]),
-          const SizedBox(height: 10),
-          ...linhas.map((l) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Padding(padding: EdgeInsets.only(top: 6), child: Icon(Icons.circle, size: 4, color: _laranja)),
-                    const SizedBox(width: 8),
-                    Expanded(child: Text(l, style: const TextStyle(fontSize: 12, height: 1.4, color: _slate600, fontWeight: FontWeight.w500))),
-                  ],
+          const Row(
+            children: [
+              Icon(Icons.info_outline_rounded, size: 16, color: _slate600),
+              const SizedBox(width: 8),
+              Text(
+                'Parâmetros e Regras de Negócio Aplicadas',
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                  color: _slate900,
                 ),
-              )),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ...linhas.map(
+            (l) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(top: 6),
+                    child: Icon(Icons.circle, size: 4, color: _laranja),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      l,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        height: 1.4,
+                        color: _slate600,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -498,9 +684,21 @@ class _FiltrosBarra extends StatelessWidget {
   Widget build(BuildContext context) {
     final tabs = [
       ('todos', 'Todos', materiais.length),
-      ('alterados', 'Alterados', materiais.where((m) => m['foi_editado'] == true).length),
-      ('sem_alteracao', 'Sem alteração', materiais.where((m) => m['foi_editado'] != true).length),
-      ('excecoes', 'Exceções', materiais.where((m) => _statusLabel(m) == 'Exceção manual').length),
+      (
+        'alterados',
+        'Alterados',
+        materiais.where((m) => m['foi_editado'] == true).length,
+      ),
+      (
+        'sem_alteracao',
+        'Sem alteração',
+        materiais.where((m) => m['foi_editado'] != true).length,
+      ),
+      (
+        'excecoes',
+        'Exceções',
+        materiais.where((m) => _statusLabel(m) == 'Exceção manual').length,
+      ),
     ];
 
     return Container(
@@ -533,7 +731,9 @@ class _FiltrosBarra extends StatelessWidget {
                   color: active ? _laranja.withOpacity(0.5) : _slate200,
                   width: active ? 1.5 : 1,
                 ),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
             );
           }),
@@ -545,8 +745,16 @@ class _FiltrosBarra extends StatelessWidget {
               style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
               decoration: InputDecoration(
                 hintText: 'Buscar código ou material...',
-                hintStyle: const TextStyle(fontSize: 12, color: _slate400, fontWeight: FontWeight.w500),
-                prefixIcon: const Icon(Icons.search_rounded, size: 18, color: _slate600),
+                hintStyle: const TextStyle(
+                  fontSize: 12,
+                  color: _slate400,
+                  fontWeight: FontWeight.w500,
+                ),
+                prefixIcon: const Icon(
+                  Icons.search_rounded,
+                  size: 18,
+                  color: _slate600,
+                ),
                 isDense: true,
                 filled: true,
                 fillColor: _bgSuave,
@@ -578,6 +786,7 @@ class _TabelaDetalhe extends StatelessWidget {
   final List<Map<String, dynamic>> Function(List<Map<String, dynamic>>) filtrar;
   final String busca;
   final String filtroTab;
+  final Map<String, MaterialDraftPreview> previewByKey;
   final void Function(String) onToggle;
 
   const _TabelaDetalhe({
@@ -586,6 +795,7 @@ class _TabelaDetalhe extends StatelessWidget {
     required this.filtrar,
     required this.busca,
     required this.filtroTab,
+    required this.previewByKey,
     required this.onToggle,
   });
 
@@ -599,7 +809,10 @@ class _TabelaDetalhe extends StatelessWidget {
           border: Border.all(color: _slate200),
         ),
         child: const Center(
-          child: Text('Nenhum material encontrado no rascunho.', style: TextStyle(color: _slate600, fontWeight: FontWeight.w500)),
+          child: Text(
+            'Nenhum material encontrado no rascunho.',
+            style: TextStyle(color: _slate600, fontWeight: FontWeight.w500),
+          ),
         ),
       );
     }
@@ -619,8 +832,11 @@ class _TabelaDetalhe extends StatelessWidget {
             final chave = entry.key;
             final grupo = entry.value;
             final filtrados = filtrar(grupo);
-            if (filtrados.isEmpty && busca.isNotEmpty) return const SizedBox.shrink();
-            if (filtrados.isEmpty && filtroTab != 'todos' && filtroTab != 'sem_alteracao') {
+            if (filtrados.isEmpty && busca.isNotEmpty)
+              return const SizedBox.shrink();
+            if (filtrados.isEmpty &&
+                filtroTab != 'todos' &&
+                filtroTab != 'sem_alteracao') {
               return const SizedBox.shrink();
             }
             return _GrupoExpansivel(
@@ -628,6 +844,7 @@ class _TabelaDetalhe extends StatelessWidget {
               grupo: grupo,
               filtrados: filtrados,
               expandido: listasExpandidas.contains(chave),
+              previewByKey: previewByKey,
               onToggle: () => onToggle(chave),
             );
           }),
@@ -655,12 +872,23 @@ class _TabelaDetalhe extends StatelessWidget {
     );
   }
 
-  static Widget _th(String label, {required int flex, TextAlign align = TextAlign.left}) {
+  static Widget _th(
+    String label, {
+    required int flex,
+    TextAlign align = TextAlign.left,
+  }) {
     return Expanded(
       flex: flex,
-      child: Text(label,
-          textAlign: align,
-          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: _slate600, letterSpacing: 0.3)),
+      child: Text(
+        label,
+        textAlign: align,
+        style: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          color: _slate600,
+          letterSpacing: 0.3,
+        ),
+      ),
     );
   }
 }
@@ -675,6 +903,7 @@ class _GrupoExpansivel extends StatelessWidget {
   final List<Map<String, dynamic>> grupo;
   final List<Map<String, dynamic>> filtrados;
   final bool expandido;
+  final Map<String, MaterialDraftPreview> previewByKey;
   final VoidCallback onToggle;
 
   const _GrupoExpansivel({
@@ -682,6 +911,7 @@ class _GrupoExpansivel extends StatelessWidget {
     required this.grupo,
     required this.filtrados,
     required this.expandido,
+    required this.previewByKey,
     required this.onToggle,
   });
 
@@ -703,26 +933,61 @@ class _GrupoExpansivel extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               child: Row(
                 children: [
-                  Icon(expandido ? Icons.keyboard_arrow_down_rounded : Icons.keyboard_arrow_right_rounded, size: 20, color: cor),
+                  Icon(
+                    expandido
+                        ? Icons.keyboard_arrow_down_rounded
+                        : Icons.keyboard_arrow_right_rounded,
+                    size: 20,
+                    color: cor,
+                  ),
                   const SizedBox(width: 8),
-                  Icon(tipoLista == 'mae' ? Icons.table_chart_outlined : Icons.account_tree_outlined, size: 16, color: cor),
+                  Icon(
+                    tipoLista == 'mae'
+                        ? Icons.table_chart_outlined
+                        : Icons.account_tree_outlined,
+                    size: 16,
+                    color: cor,
+                  ),
                   const SizedBox(width: 8),
                   Text(
                     tipoLista == 'mae' ? 'Lista Mãe' : 'Lista Filha',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: cor, letterSpacing: 0.3),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: cor,
+                      letterSpacing: 0.3,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: Text(nomeLista, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: _slate900), overflow: TextOverflow.ellipsis),
+                    child: Text(
+                      nomeLista,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                        color: _slate900,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: _slate200),
                     ),
-                    child: Text('$alterados/${grupo.length} alterados', style: const TextStyle(fontSize: 11, color: _slate600, fontWeight: FontWeight.w600)),
+                    child: Text(
+                      '$alterados/${grupo.length} alterados',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: _slate600,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -733,10 +998,23 @@ class _GrupoExpansivel extends StatelessWidget {
           if (filtrados.isEmpty)
             const Padding(
               padding: EdgeInsets.all(24),
-              child: Text('Nenhum material correspondente nesta ramificação.', style: TextStyle(color: _slate600, fontSize: 12, fontWeight: FontWeight.w500)),
+              child: Text(
+                'Nenhum material correspondente nesta ramificação.',
+                style: TextStyle(
+                  color: _slate600,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
             )
           else
-            ...filtrados.map((item) => _LinhaItem(item: item)),
+            ...filtrados.map(
+              (item) => _LinhaItem(
+                item: item,
+                preview:
+                    previewByKey['${item['product_id']}|${item['lista_id']}'],
+              ),
+            ),
         ],
         const Divider(height: 1, color: _slate100),
       ],
@@ -744,13 +1022,22 @@ class _GrupoExpansivel extends StatelessWidget {
   }
 }
 
-class _LinhaItem extends StatelessWidget {
+class _LinhaItem extends StatefulWidget {
+  final Map<String, dynamic> item;
+  final MaterialDraftPreview? preview;
+  const _LinhaItem({required this.item, this.preview});
+
+  @override
+  State<_LinhaItem> createState() => _LinhaItemState();
+}
+
+class _LinhaItemState extends State<_LinhaItem> {
   static const _laranja = Color(0xFFFF6B00);
   static const _slate900 = Color(0xFF0F172A);
   static const _slate600 = Color(0xFF475569);
   static const _slate100 = Color(0xFFF1F5F9);
-  final Map<String, dynamic> item;
-  const _LinhaItem({required this.item});
+
+  bool _expandido = false;
 
   static String _statusLabel(Map<String, dynamic> item) {
     if (item['foi_editado'] != true) return 'Sem alteração';
@@ -766,41 +1053,152 @@ class _LinhaItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final item = widget.item;
     final antigo = (item['preco_antigo'] as num).toDouble();
     final novo = (item['preco_novo'] as num).toDouble();
     final dif = novo - antigo;
     final pct = antigo > 0 ? (dif / antigo) * 100 : 0.0;
     final status = _statusLabel(item);
     final alterado = item['foi_editado'] == true;
+    final temPreview = widget.preview != null;
 
-    final difColor = dif > 0 ? const Color(0xFF047857) : dif < 0 ? const Color(0xFFB91C1C) : _slate600;
+    final difColor = dif > 0
+        ? const Color(0xFF047857)
+        : dif < 0
+        ? const Color(0xFFB91C1C)
+        : _slate600;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: alterado ? _laranja.withOpacity(0.015) : null,
-        border: const Border(bottom: BorderSide(color: _slate100)),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          _td(item['product_id'].toString(), flex: 2, style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: _slate600, fontWeight: FontWeight.w600)),
-          _td(item['description'].toString(), flex: 5, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _slate900)),
-          _td(item['lista_nome'].toString(), flex: 3, style: const TextStyle(fontSize: 11, color: _slate600, fontWeight: FontWeight.w500)),
-          _td(_fmt(antigo), flex: 2, align: TextAlign.right, style: TextStyle(fontSize: 12, color: alterado ? _slate600 : _slate900, decoration: alterado ? TextDecoration.lineThrough : null, fontWeight: FontWeight.w500)),
-          _td(_fmt(novo), flex: 2, align: TextAlign.right, style: TextStyle(fontSize: 12, fontWeight: alterado ? FontWeight.w900 : FontWeight.w600, color: alterado ? _slate900 : _slate600)),
-          _td('${dif >= 0 ? '+' : ''}${_fmt(dif)}', flex: 2, align: TextAlign.right, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: difColor)),
-          _td('${pct >= 0 ? '+' : ''}${pct.toStringAsFixed(2)}%', flex: 2, align: TextAlign.right, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: difColor)),
-          Expanded(flex: 3, child: Center(child: _Badge(status: status))),
-        ],
-      ),
+    return Column(
+      children: [
+        Material(
+          color: alterado ? _laranja.withOpacity(0.015) : Colors.white,
+          child: InkWell(
+            onTap: temPreview
+                ? () => setState(() => _expandido = !_expandido)
+                : null,
+            child: Container(
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: _slate100)),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 20,
+                    child: temPreview
+                        ? Icon(
+                            _expandido
+                                ? Icons.keyboard_arrow_down_rounded
+                                : Icons.keyboard_arrow_right_rounded,
+                            size: 18,
+                            color: _slate600,
+                          )
+                        : null,
+                  ),
+                  _td(
+                    item['product_id'].toString(),
+                    flex: 2,
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                      color: _slate600,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  _td(
+                    item['description'].toString(),
+                    flex: 5,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: _slate900,
+                    ),
+                  ),
+                  _td(
+                    item['lista_nome'].toString(),
+                    flex: 3,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: _slate600,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  _td(
+                    _fmt(antigo),
+                    flex: 2,
+                    align: TextAlign.right,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: alterado ? _slate600 : _slate900,
+                      decoration: alterado ? TextDecoration.lineThrough : null,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  _td(
+                    _fmt(novo),
+                    flex: 2,
+                    align: TextAlign.right,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: alterado ? FontWeight.w900 : FontWeight.w600,
+                      color: alterado ? _slate900 : _slate600,
+                    ),
+                  ),
+                  _td(
+                    '${dif >= 0 ? '+' : ''}${_fmt(dif)}',
+                    flex: 2,
+                    align: TextAlign.right,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: difColor,
+                    ),
+                  ),
+                  _td(
+                    '${pct >= 0 ? '+' : ''}${pct.toStringAsFixed(2)}%',
+                    flex: 2,
+                    align: TextAlign.right,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: difColor,
+                    ),
+                  ),
+                  Expanded(
+                    flex: 3,
+                    child: Center(child: _Badge(status: status)),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (_expandido && widget.preview != null)
+          Container(
+            color: const Color(0xFFF8FAFC),
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+            child: MaterialPrecoCardView(m: widget.preview!.toMaterialPreco()),
+          ),
+      ],
     );
   }
 
-  static Widget _td(String text, {required int flex, TextAlign align = TextAlign.left, TextStyle? style}) {
+  static Widget _td(
+    String text, {
+    required int flex,
+    TextAlign align = TextAlign.left,
+    TextStyle? style,
+  }) {
     return Expanded(
       flex: flex,
-      child: Text(text, textAlign: align, style: style, overflow: TextOverflow.ellipsis, maxLines: 2),
+      child: Text(
+        text,
+        textAlign: align,
+        style: style,
+        overflow: TextOverflow.ellipsis,
+        maxLines: 2,
+      ),
     );
   }
 }
@@ -818,10 +1216,18 @@ class _Badge extends StatelessWidget {
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(6)),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+      ),
       child: Text(
         status,
-        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: fg, letterSpacing: 0.1),
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          color: fg,
+          letterSpacing: 0.1,
+        ),
       ),
     );
   }

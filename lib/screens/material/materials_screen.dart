@@ -66,6 +66,7 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
   bool _syncando = false;
   bool _baixando = false;
   bool _uploadando = false;
+  bool _uploadandoCustos = false;
 
   // Seleção na árvore
   String? _agrupamentoSelecionado;
@@ -274,6 +275,33 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
     }
   }
 
+  Future<void> _uploadCustos() async {
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['xlsx'],
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+    final bytes = result.files.first.bytes;
+    if (bytes == null) { _snack('Não foi possível ler o arquivo.', erro: true); return; }
+
+    setState(() => _uploadandoCustos = true);
+    try {
+      final res = await _service.processarUploadCustos(bytes);
+      if (!mounted) return;
+      if (res.erros > 0) {
+        _mostrarErrosUpload(res);
+      } else {
+        _snack('✓ ${res.atualizados} custos (CPV/Ded/DV) atualizados com sucesso!');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      _snack('Erro ao processar planilha de custos: $e', erro: true);
+    } finally {
+      if (mounted) setState(() => _uploadandoCustos = false);
+    }
+  }
+
   void _mostrarErrosUpload(UploadResult res) {
     showDialog(
       context: context,
@@ -350,17 +378,30 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
               child: Text('${_materiais.length}',
                 style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _C.cinzaSub)),
             ),
-          const Spacer(),
-          _BotaoAcao(label: 'Sincronizar SAP', icon: Icons.sync_rounded,
-            loading: _syncando, cor: _C.azulEscuro, onTap: _syncando ? null : _syncSap),
-          const SizedBox(width: 10),
-          _BotaoAcao(label: 'Baixar Planilha', icon: Icons.download_rounded,
-            loading: _baixando, cor: _C.cinzaSub, outlined: true,
-            onTap: (_baixando || _materiais.isEmpty) ? null : _baixarPlanilha),
-          const SizedBox(width: 10),
-          _BotaoAcao(label: 'Subir Planilha', icon: Icons.upload_rounded,
-            loading: _uploadando, cor: _C.laranja,
-            onTap: (_uploadando || _materiais.isEmpty) ? null : _uploadPlanilha),
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              reverse: true,
+              child: Row(
+                children: [
+                  _BotaoAcao(label: 'Sincronizar SAP', icon: Icons.sync_rounded,
+                    loading: _syncando, cor: _C.azulEscuro, onTap: _syncando ? null : _syncSap),
+                  const SizedBox(width: 10),
+                  _BotaoAcao(label: 'Baixar Planilha', icon: Icons.download_rounded,
+                    loading: _baixando, cor: _C.cinzaSub, outlined: true,
+                    onTap: (_baixando || _materiais.isEmpty) ? null : _baixarPlanilha),
+                  const SizedBox(width: 10),
+                  _BotaoAcao(label: 'Subir Planilha', icon: Icons.upload_rounded,
+                    loading: _uploadando, cor: _C.laranja,
+                    onTap: (_uploadando || _materiais.isEmpty) ? null : _uploadPlanilha),
+                  const SizedBox(width: 10),
+                  _BotaoAcao(label: 'Subir Custos', icon: Icons.request_quote_rounded,
+                    loading: _uploadandoCustos, cor: _C.laranja,
+                    onTap: _uploadandoCustos ? null : _uploadCustos),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );

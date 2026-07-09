@@ -6,24 +6,23 @@ const _laranja = Color(0xFFFF6B00);
 const _azulInfo = Color(0xFF0EA5E9);
 
 // ── Paleta das seções ────────────────────────────────────────────────────────
-const _corAtualBg     = Color(0xFFF0F6FF);
-const _corAtualBorda  = Color(0xFFBFD7FF);
-const _corAtualLabel  = Color(0xFF3B82F6);
+const _corAtualBg = Color(0xFFF0F6FF);
+const _corAtualBorda = Color(0xFFBFD7FF);
+const _corAtualLabel = Color(0xFF3B82F6);
 
-const _corNovoBg      = Color(0xFFFFF8F2);
-const _corNovoBorda   = Color(0xFFFFCCA0);
-const _corNovoLabel   = Color(0xFFFF6B00);
+const _corNovoBg = Color(0xFFFFF8F2);
+const _corNovoBorda = Color(0xFFFFCCA0);
+const _corNovoLabel = Color(0xFFFF6B00);
 
-const _corOfertaBg    = Color(0xFFF0FDF6);
+const _corOfertaBg = Color(0xFFF0FDF6);
 const _corOfertaBorda = Color(0xFF86EFAC);
 const _corOfertaLabel = Color(0xFF16A34A);
 
 // Alturas e tamanhos base
-const _labelFontSize  = 10.0;
-const _valorFontSize  = 13.0;
-const _inputFontSize  = 13.0;
-const _rowVPad        = 14.0;
-const _rowHPad        = 16.0;
+const _labelFontSize = 10.0;
+const _valorFontSize = 13.0;
+const _inputFontSize = 13.0;
+const _rowHPad = 16.0;
 
 class TabelaPrecos extends StatefulWidget {
   final PrecoController controller;
@@ -44,15 +43,24 @@ class _TabelaPrecosState extends State<TabelaPrecos> {
     if (_filtroAtivo == null) return base;
     return base.where((m) {
       switch (_filtroAtivo) {
-        case 'ok':         return m.statusMargem == 'ok';
-        case 'atencao':    return m.statusMargem == 'atencao';
-        case 'critico':    return m.statusMargem == 'critico';
-        case 'prejuizo':   return m.statusMargem == 'prejuizo';
-        case 'sem margem': return m.statusMargem == 'sem margem';
-        case 'sem-cpv':    return m.statusMargem == 'sem-cpv';
-        case 'bloqueado':  return m.bloqueado;
-        case 'inativo':    return m.inativo;
-        default:           return true;
+        case 'ok':
+          return m.statusMargem == 'ok';
+        case 'atencao':
+          return m.statusMargem == 'atencao';
+        case 'critico':
+          return m.statusMargem == 'critico';
+        case 'prejuizo':
+          return m.statusMargem == 'prejuizo';
+        case 'sem margem':
+          return m.statusMargem == 'sem margem';
+        case 'sem-cpv':
+          return m.statusMargem == 'sem-cpv';
+        case 'bloqueado':
+          return m.bloqueado;
+        case 'inativo':
+          return m.inativo;
+        default:
+          return true;
       }
     }).toList();
   }
@@ -73,7 +81,11 @@ class _TabelaPrecosState extends State<TabelaPrecos> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.table_chart_outlined, size: 56, color: Colors.grey.shade200),
+            Icon(
+              Icons.table_chart_outlined,
+              size: 56,
+              color: Colors.grey.shade200,
+            ),
             const SizedBox(height: 14),
             Text(
               'Selecione uma tabela para ver os materiais',
@@ -89,7 +101,9 @@ class _TabelaPrecosState extends State<TabelaPrecos> {
     return Column(
       children: [
         RepaintBoundary(child: _legenda(ctrl.filtrados)),
+        const SizedBox(height: 10),
         _cabecalho(),
+        const SizedBox(height: 6),
         if (lista.isEmpty)
           Expanded(
             child: Center(
@@ -128,29 +142,24 @@ class _TabelaPrecosState extends State<TabelaPrecos> {
 
   Widget _cabecalho() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: _rowHPad, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      margin: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
         color: const Color(0xFFF8FAFC),
-        border: Border(
-          bottom: BorderSide(color: Colors.grey.shade200),
-        ),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.shade200),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Coluna de identidade
-          const SizedBox(width: 220),
-          const SizedBox(width: 16),
-
           // ATUAL
           Expanded(
-            flex: 5,
+            flex: 6,
             child: _cabecalhoSecao(
               'ATUAL',
               _corAtualLabel,
               _corAtualBg,
               _corAtualBorda,
-              ['PPV Caixa', 'PPV Unit', 'MC% Cliente', 'MC R\$', 'MC% Pole'],
             ),
           ),
           const SizedBox(width: 10),
@@ -158,7 +167,12 @@ class _TabelaPrecosState extends State<TabelaPrecos> {
           // NOVO
           Expanded(
             flex: 7,
-            child: _cabecalhoSecaoNovo(),
+            child: _cabecalhoSecao(
+              'NOVO',
+              _corNovoLabel,
+              _corNovoBg,
+              _corNovoBorda,
+            ),
           ),
           const SizedBox(width: 10),
 
@@ -170,12 +184,8 @@ class _TabelaPrecosState extends State<TabelaPrecos> {
               _corOfertaLabel,
               _corOfertaBg,
               _corOfertaBorda,
-              ['% Reajuste', 'PPV Unit', 'PPC'],
             ),
           ),
-
-          // Espaço do botão remover
-          const SizedBox(width: 40),
         ],
       ),
     );
@@ -186,87 +196,23 @@ class _TabelaPrecosState extends State<TabelaPrecos> {
     Color labelColor,
     Color bg,
     Color borda,
-    List<String> cols,
   ) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      alignment: Alignment.centerLeft,
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: borda),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            titulo,
-            style: TextStyle(
-              fontSize: 9,
-              fontWeight: FontWeight.w800,
-              color: labelColor,
-              letterSpacing: 1.2,
-            ),
-          ),
-          const SizedBox(height: 5),
-          Row(
-            children: cols.map((c) {
-              return Expanded(
-                child: Text(
-                  c,
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey.shade500,
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _cabecalhoSecaoNovo() {
-    final cols = ['PPV Caixa', 'PPV Unit', 'PPC Novo', 'MC% Cliente', 'MC R\$', 'MC% Pole', '% Reajuste'];
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: _corNovoBg,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: _corNovoBorda),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'NOVO',
-            style: TextStyle(
-              fontSize: 9,
-              fontWeight: FontWeight.w800,
-              color: _corNovoLabel,
-              letterSpacing: 1.2,
-            ),
-          ),
-          const SizedBox(height: 5),
-          Row(
-            children: cols.map((c) {
-              final isPpc = c == 'PPC Novo';
-              return Expanded(
-                child: Text(
-                  c,
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: isPpc ? FontWeight.w800 : FontWeight.w600,
-                    color: isPpc ? _laranja : Colors.grey.shade500,
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-        ],
+      child: Text(
+        titulo,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+          color: labelColor,
+          letterSpacing: 1.2,
+        ),
       ),
     );
   }
@@ -274,19 +220,36 @@ class _TabelaPrecosState extends State<TabelaPrecos> {
   // ── Legenda / filtros ──────────────────────────────────────────────────────
 
   Widget _legenda(List<MaterialPreco> lista) {
-    int ok = 0, atencao = 0, critico = 0, semMargem = 0, prejuizo = 0,
-        semCpv = 0, bloqueados = 0, inativos = 0;
+    int ok = 0,
+        atencao = 0,
+        critico = 0,
+        semMargem = 0,
+        prejuizo = 0,
+        semCpv = 0,
+        bloqueados = 0,
+        inativos = 0;
 
     for (final m in lista) {
       if (m.bloqueado) bloqueados++;
-      if (m.inativo)   inativos++;
+      if (m.inativo) inativos++;
       switch (m.statusMargem) {
-        case 'ok':         ok++;         break;
-        case 'atencao':    atencao++;    break;
-        case 'critico':    critico++;    break;
-        case 'prejuizo':   prejuizo++;   break;
-        case 'sem margem': semMargem++;  break;
-        default:           semCpv++;
+        case 'ok':
+          ok++;
+          break;
+        case 'atencao':
+          atencao++;
+          break;
+        case 'critico':
+          critico++;
+          break;
+        case 'prejuizo':
+          prejuizo++;
+          break;
+        case 'sem margem':
+          semMargem++;
+          break;
+        default:
+          semCpv++;
       }
     }
 
@@ -313,14 +276,39 @@ class _TabelaPrecosState extends State<TabelaPrecos> {
                     color: Colors.grey.shade600,
                   ),
                 ),
-                if (ok > 0)         _legendaBtn('ok',         Colors.green,              '$ok ok'),
-                if (atencao > 0)    _legendaBtn('atencao',    Colors.orange,             '$atencao atenção'),
-                if (critico > 0)    _legendaBtn('critico',    Colors.deepOrange,         '$critico crítico'),
-                if (prejuizo > 0)   _legendaBtn('prejuizo',   Colors.red.shade900,       '$prejuizo prejuízo'),
-                if (semMargem > 0)  _legendaBtn('sem margem', Colors.red,                '$semMargem sem margem'),
-                if (semCpv > 0)     _legendaBtn('sem-cpv',    Colors.grey,               '$semCpv sem CPV'),
-                if (bloqueados > 0) _legendaBtn('bloqueado',  Colors.red.shade400,       '$bloqueados bloqueado', icon: Icons.lock_outline),
-                if (inativos > 0)   _legendaBtn('inativo',    Colors.orange.shade700,    '$inativos inativo',     icon: Icons.pause_circle_outline),
+                if (ok > 0) _legendaBtn('ok', Colors.green, '$ok ok'),
+                if (atencao > 0)
+                  _legendaBtn('atencao', Colors.orange, '$atencao atenção'),
+                if (critico > 0)
+                  _legendaBtn('critico', Colors.deepOrange, '$critico crítico'),
+                if (prejuizo > 0)
+                  _legendaBtn(
+                    'prejuizo',
+                    Colors.red.shade900,
+                    '$prejuizo prejuízo',
+                  ),
+                if (semMargem > 0)
+                  _legendaBtn(
+                    'sem margem',
+                    Colors.red,
+                    '$semMargem sem margem',
+                  ),
+                if (semCpv > 0)
+                  _legendaBtn('sem-cpv', Colors.grey, '$semCpv sem CPV'),
+                if (bloqueados > 0)
+                  _legendaBtn(
+                    'bloqueado',
+                    Colors.red.shade400,
+                    '$bloqueados bloqueado',
+                    icon: Icons.lock_outline,
+                  ),
+                if (inativos > 0)
+                  _legendaBtn(
+                    'inativo',
+                    Colors.orange.shade700,
+                    '$inativos inativo',
+                    icon: Icons.pause_circle_outline,
+                  ),
               ],
             ),
           ),
@@ -331,9 +319,16 @@ class _TabelaPrecosState extends State<TabelaPrecos> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.filter_alt_off, size: 14, color: Colors.grey.shade400),
+                  Icon(
+                    Icons.filter_alt_off,
+                    size: 14,
+                    color: Colors.grey.shade400,
+                  ),
                   const SizedBox(width: 4),
-                  Text('Limpar filtro', style: TextStyle(fontSize: 12, color: Colors.grey.shade400)),
+                  Text(
+                    'Limpar filtro',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
+                  ),
                 ],
               ),
             ),
@@ -361,8 +356,12 @@ class _TabelaPrecosState extends State<TabelaPrecos> {
             icon != null
                 ? Icon(icon, size: 10, color: cor)
                 : Container(
-                    width: 8, height: 8,
-                    decoration: BoxDecoration(color: cor, shape: BoxShape.circle),
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: cor,
+                      shape: BoxShape.circle,
+                    ),
                   ),
             const SizedBox(width: 5),
             Text(
@@ -412,13 +411,19 @@ class _ItemMaterialState extends State<_ItemMaterial> {
   void initState() {
     super.initState();
     _ppcNovoCtrl = TextEditingController(
-      text: m.ppcNovoOverride != null ? m.ppcNovoOverride!.toStringAsFixed(2) : '',
+      text: m.ppcNovoOverride != null
+          ? m.ppcNovoOverride!.toStringAsFixed(2)
+          : '',
     );
     _ppcOfertaCtrl = TextEditingController(
-      text: m.ppcOfertaOverride != null ? m.ppcOfertaOverride!.toStringAsFixed(2) : '',
+      text: m.ppcOfertaOverride != null
+          ? m.ppcOfertaOverride!.toStringAsFixed(2)
+          : '',
     );
     _ppvUnitNovoCtrl = TextEditingController(
-      text: m.ppvUnitNovoOverride != null ? m.ppvUnitNovoOverride!.toStringAsFixed(2) : '',
+      text: m.ppvUnitNovoOverride != null
+          ? m.ppvUnitNovoOverride!.toStringAsFixed(2)
+          : '',
     );
     _reajusteCtrl = TextEditingController(
       text: m.reajusteOverride != null
@@ -469,7 +474,8 @@ class _ItemMaterialState extends State<_ItemMaterial> {
     if (val != null) {
       final ppcCalculado = m.ppcDePpvUnit(val);
       m.ppcNovoOverride = ppcCalculado;
-      if (ppcCalculado != null) _ppcNovoCtrl.text = ppcCalculado.toStringAsFixed(2);
+      if (ppcCalculado != null)
+        _ppcNovoCtrl.text = ppcCalculado.toStringAsFixed(2);
     }
     final ppvCx = m.ppvCxNovo;
     if (ppvCx != null) m.novoPreco = ppvCx;
@@ -508,37 +514,57 @@ class _ItemMaterialState extends State<_ItemMaterial> {
   @override
   Widget build(BuildContext context) {
     final temRestricao = m.bloqueado || m.inativo;
-    final statusNovo   = m.statusMargem;
-    final corLinha     = _corStatus(statusNovo);
+    final statusNovo = m.statusMargem;
+    final corLinha = _corStatus(statusNovo);
 
+    // BoxDecoration não aceita borderRadius com bordas de cores diferentes
+    // (a faixa de status à esquerda é colorida, o resto é cinza) — por isso
+    // a faixa é um Container próprio dentro de um ClipRRect, e a borda
+    // "uniforme" cinza fica num Container externo separado.
     return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(
-          bottom: BorderSide(
-            color: widget.isLast ? Colors.transparent : Colors.grey.shade100,
-            width: 1.5,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
-          left: BorderSide(color: corLinha, width: 4),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(width: 4, color: corLinha),
+              Expanded(
+                child: Container(
+                  color: Colors.white,
+                  padding: const EdgeInsets.all(14),
+                  child: _corpoCard(temRestricao),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
-      padding: const EdgeInsets.symmetric(
-        horizontal: _rowHPad,
-        vertical: _rowVPad,
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          // ── Identidade ─────────────────────────────────────────────
-          SizedBox(
-            width: 220,
-            child: Tooltip(
-              richMessage: _tooltipContent(m),
-              preferBelow: true,
-              decoration: BoxDecoration(
-                color: const Color(0xFF1E293B),
-                borderRadius: BorderRadius.circular(10),
-              ),
+    );
+  }
+
+  Widget _corpoCard(bool temRestricao) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // ── Topo: material + descrição ──────────────────────────
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
@@ -563,8 +589,8 @@ class _ItemMaterialState extends State<_ItemMaterial> {
                   Text(
                     m.description.isNotEmpty ? m.description : m.codigo,
                     style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
                       color: m.description.isNotEmpty
                           ? Colors.black87
                           : Colors.grey.shade400,
@@ -573,43 +599,46 @@ class _ItemMaterialState extends State<_ItemMaterial> {
                           : FontStyle.italic,
                     ),
                     overflow: TextOverflow.ellipsis,
-                    maxLines: 2,
+                    maxLines: 1,
                   ),
-                  if (m.cpv != null) ...[
-                    const SizedBox(height: 3),
-                    Text(
-                      'CPV R\$ ${m.cpv!.toStringAsFixed(2)}  ·  fator ${m.fatorConversao?.toStringAsFixed(1) ?? "—"}',
-                      style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
-                    ),
-                  ],
                 ],
               ),
             ),
-          ),
+            if (m.cpv != null)
+              Padding(
+                padding: const EdgeInsets.only(left: 12, top: 2),
+                child: Text(
+                  'CPV R\$ ${m.cpv!.toStringAsFixed(2)}  ·  fator ${m.fatorConversao?.toStringAsFixed(1) ?? "—"}',
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
+                ),
+              ),
+            IconButton(
+              icon: Icon(
+                Icons.delete_outline,
+                size: 17,
+                color: Colors.grey.shade300,
+              ),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32),
+              tooltip: 'Remover material',
+              onPressed: widget.onRemover,
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
 
-          const SizedBox(width: 16),
-
-          // ── Seção ATUAL ────────────────────────────────────────────
-          Expanded(flex: 5, child: _secaoAtual()),
-          const SizedBox(width: 10),
-
-          // ── Seção NOVO ─────────────────────────────────────────────
-          Expanded(flex: 7, child: _secaoNovo()),
-          const SizedBox(width: 10),
-
-          // ── Seção OFERTA ───────────────────────────────────────────
-          Expanded(flex: 3, child: _secaoOferta()),
-
-          // ── Botão remover ──────────────────────────────────────────
-          IconButton(
-            icon: Icon(Icons.delete_outline, size: 17, color: Colors.grey.shade300),
-            padding: const EdgeInsets.only(left: 8),
-            constraints: const BoxConstraints(minWidth: 32),
-            tooltip: 'Remover material',
-            onPressed: widget.onRemover,
-          ),
-        ],
-      ),
+        // ── Info: Atual / Novo / Oferta ──────────────────────────
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(flex: 6, child: _secaoAtual()),
+            const SizedBox(width: 10),
+            Expanded(flex: 7, child: _secaoNovo()),
+            const SizedBox(width: 10),
+            Expanded(flex: 3, child: _secaoOferta()),
+          ],
+        ),
+      ],
     );
   }
 
@@ -621,8 +650,23 @@ class _ItemMaterialState extends State<_ItemMaterial> {
       borda: _corAtualBorda,
       child: Row(
         children: [
-          _Col(label: 'PPV CX',      value: 'R\$ ${m.precoAtual.toStringAsFixed(2)}'),
-          _Col(label: 'PPV Unit',    value: m.ppvUnitAtual != null ? 'R\$ ${m.ppvUnitAtual!.toStringAsFixed(2)}' : '—'),
+          _Col(
+            label: 'PPV CX',
+            value: 'R\$ ${m.precoAtual.toStringAsFixed(2)}',
+          ),
+          _Col(
+            label: 'PPV Unit',
+            value: m.ppvUnitAtual != null
+                ? 'R\$ ${m.ppvUnitAtual!.toStringAsFixed(2)}'
+                : '—',
+          ),
+          _Col(
+            label: 'PPC',
+            value: m.ppcAtual != null
+                ? 'R\$ ${m.ppcAtual!.toStringAsFixed(2)}'
+                : '—',
+            color: Colors.grey.shade400,
+          ),
           _Col(
             label: 'MC% Cliente',
             value: m.margemClienteAtual != null
@@ -632,7 +676,9 @@ class _ItemMaterialState extends State<_ItemMaterial> {
           ),
           _Col(
             label: 'MC R\$',
-            value: m.mcReaisAtual != null ? 'R\$ ${m.mcReaisAtual!.toStringAsFixed(2)}' : '—',
+            value: m.mcReaisAtual != null
+                ? 'R\$ ${m.mcReaisAtual!.toStringAsFixed(2)}'
+                : '—',
             color: Colors.grey.shade500,
           ),
           _Col(
@@ -640,7 +686,9 @@ class _ItemMaterialState extends State<_ItemMaterial> {
             value: m.mcPctAtual != null
                 ? '${(m.mcPctAtual! * 100).toStringAsFixed(1)}%'
                 : '—',
-            color: m.mcPctAtual != null ? _corMargem(m.mcPctAtual!, m) : Colors.grey.shade400,
+            color: m.mcPctAtual != null
+                ? _corMargem(m.mcPctAtual!, m)
+                : Colors.grey.shade400,
             bold: m.mcPctAtual != null,
           ),
         ],
@@ -651,12 +699,12 @@ class _ItemMaterialState extends State<_ItemMaterial> {
   // ── Seção NOVO ────────────────────────────────────────────────────────────
 
   Widget _secaoNovo() {
-    final ppvCxNovo  = m.ppvCxNovo;
+    final ppvCxNovo = m.ppvCxNovo;
     final ppvUnitNovo = m.ppvUnitNovo;
-    final mcCliente  = m.margemClienteNovo;
-    final mcReais    = m.mcReaisNovo;
-    final mcPct      = m.mcPctNovo;
-    final reaj       = m.reajustePct;
+    final mcCliente = m.margemClienteNovo;
+    final mcReais = m.mcReaisNovo;
+    final mcPct = m.mcPctNovo;
+    final reaj = m.reajustePct;
     final statusNovo = m.statusMargem;
 
     return _SecaoBox(
@@ -667,7 +715,9 @@ class _ItemMaterialState extends State<_ItemMaterial> {
           // PPV CX (readonly)
           _Col(
             label: 'PPV CX',
-            value: ppvCxNovo != null ? 'R\$ ${ppvCxNovo.toStringAsFixed(2)}' : '—',
+            value: ppvCxNovo != null
+                ? 'R\$ ${ppvCxNovo.toStringAsFixed(2)}'
+                : '—',
             color: ppvCxNovo != null ? Colors.black87 : Colors.grey.shade400,
           ),
           // PPV Unit (editável)
@@ -690,7 +740,9 @@ class _ItemMaterialState extends State<_ItemMaterial> {
           // MC% Cliente
           _Col(
             label: 'MC% Cliente',
-            value: mcCliente != null ? '${(mcCliente * 100).toStringAsFixed(1)}%' : '—',
+            value: mcCliente != null
+                ? '${(mcCliente * 100).toStringAsFixed(1)}%'
+                : '—',
             color: Colors.grey.shade500,
           ),
           // MC R$
@@ -700,14 +752,13 @@ class _ItemMaterialState extends State<_ItemMaterial> {
             color: Colors.grey.shade500,
           ),
           // MC% Pole + semáforo
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: mcPct != null
-                  ? _semaforoPct(mcPct, statusNovo)
-                  : _Col(label: 'MC% Pole', value: '—', color: Colors.grey.shade400),
-            ),
-          ),
+          mcPct != null
+              ? _semaforoPct(mcPct, statusNovo)
+              : _Col(
+                  label: 'MC% Pole',
+                  value: '—',
+                  color: Colors.grey.shade400,
+                ),
           // % Reajuste (editável)
           _ColInput(
             label: '% Reajuste',
@@ -717,7 +768,11 @@ class _ItemMaterialState extends State<_ItemMaterial> {
             onChanged: _onReajusteChanged,
             onSubmitted: _onReajusteChanged,
             color: reaj != null
-                ? (reaj > 0 ? Colors.green.shade700 : reaj < 0 ? Colors.red : Colors.grey.shade600)
+                ? (reaj > 0
+                      ? Colors.green.shade700
+                      : reaj < 0
+                      ? Colors.red
+                      : Colors.grey.shade600)
                 : null,
           ),
         ],
@@ -729,7 +784,8 @@ class _ItemMaterialState extends State<_ItemMaterial> {
 
   Widget _secaoOferta() {
     final ppvUnitOferta = m.ppvUnitOferta;
-    final reajOferta = (m.ppcOfertaOverride != null &&
+    final reajOferta =
+        (m.ppcOfertaOverride != null &&
             m.ppvUnitAtual != null &&
             m.ppvUnitAtual! > 0)
         ? (ppvUnitOferta != null ? (ppvUnitOferta / m.ppvUnitAtual!) - 1 : null)
@@ -742,15 +798,23 @@ class _ItemMaterialState extends State<_ItemMaterial> {
         children: [
           _Col(
             label: '% Reajuste',
-            value: reajOferta != null ? '${(reajOferta * 100).toStringAsFixed(1)}%' : '—',
+            value: reajOferta != null
+                ? '${(reajOferta * 100).toStringAsFixed(1)}%'
+                : '—',
             color: reajOferta != null
-                ? (reajOferta < 0 ? Colors.green.shade700 : Colors.orange.shade700)
+                ? (reajOferta < 0
+                      ? Colors.green.shade700
+                      : Colors.orange.shade700)
                 : Colors.grey.shade400,
           ),
           _Col(
             label: 'PPV Unit',
-            value: ppvUnitOferta != null ? 'R\$ ${ppvUnitOferta.toStringAsFixed(2)}' : '—',
-            color: ppvUnitOferta != null ? Colors.green.shade700 : Colors.grey.shade400,
+            value: ppvUnitOferta != null
+                ? 'R\$ ${ppvUnitOferta.toStringAsFixed(2)}'
+                : '—',
+            color: ppvUnitOferta != null
+                ? Colors.green.shade700
+                : Colors.grey.shade400,
           ),
           _ColInput(
             label: 'PPC Oferta',
@@ -766,47 +830,54 @@ class _ItemMaterialState extends State<_ItemMaterial> {
 
   // ── Semáforo de margem ────────────────────────────────────────────────────
 
+  // Auto-envolvido em Expanded+Padding, igual _Col/_ColInput, para poder
+  // ser usado como filho direto de um Row de seção.
   Widget _semaforoPct(double mcPct, String status) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          'MC% Pole',
-          textAlign: TextAlign.right,
-          style: TextStyle(
-            fontSize: _labelFontSize,
-            color: Colors.grey.shade400,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(_iconeStatus(status), size: 13, color: _corStatus(status)),
-            const SizedBox(width: 3),
-            Flexible(
-              child: Text(
-                '${(mcPct * 100).toStringAsFixed(1)}%',
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: _corStatus(status),
-                  fontWeight: FontWeight.bold,
-                  fontSize: _valorFontSize,
+            Text(
+              'MC% Pole',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: _labelFontSize,
+                color: Colors.grey.shade400,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(_iconeStatus(status), size: 13, color: _corStatus(status)),
+                const SizedBox(width: 3),
+                Flexible(
+                  child: Text(
+                    '${(mcPct * 100).toStringAsFixed(1)}%',
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: _corStatus(status),
+                      fontWeight: FontWeight.bold,
+                      fontSize: _valorFontSize,
+                    ),
+                  ),
                 ),
+              ],
+            ),
+            Text(
+              _labelStatus(status),
+              style: TextStyle(
+                fontSize: 10,
+                color: _corStatus(status).withOpacity(0.75),
               ),
             ),
           ],
         ),
-        Text(
-          _labelStatus(status),
-          style: TextStyle(
-            fontSize: 10,
-            color: _corStatus(status).withOpacity(0.75),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
@@ -816,7 +887,8 @@ class _ItemMaterialState extends State<_ItemMaterial> {
       children: [
         if (m.bloqueado) _chip('BLOQ', Colors.red.shade700, Colors.red.shade50),
         if (m.bloqueado && m.inativo) const SizedBox(width: 3),
-        if (m.inativo) _chip('INAT', Colors.orange.shade800, Colors.orange.shade50),
+        if (m.inativo)
+          _chip('INAT', Colors.orange.shade800, Colors.orange.shade50),
       ],
     );
   }
@@ -831,72 +903,72 @@ class _ItemMaterialState extends State<_ItemMaterial> {
       ),
       child: Text(
         label,
-        style: TextStyle(fontSize: 9, color: textColor, fontWeight: FontWeight.w700),
+        style: TextStyle(
+          fontSize: 9,
+          color: textColor,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }
 
-  InlineSpan _tooltipContent(MaterialPreco m) {
-    final lines = <String>[
-      'Código: ${m.codigo}',
-      'Vigência: ${m.vigenciaFormatada}',
-      if (m.pesoCaixa != null && m.pesoUnidade != null)
-        'Caixa: ${m.pesoCaixa!.toStringAsFixed(3)} kg · Unit: ${m.pesoUnidade!.toStringAsFixed(3)} kg',
-      if (m.fatorConversao != null)
-        'Fator conversão: ${m.fatorConversao!.toStringAsFixed(1)} un/cx',
-      if (m.cpv != null)        'CPV: R\$${m.cpv!.toStringAsFixed(4)}',
-      if (m.kgSug != null)      'kg_sug SAP: R\$${m.kgSug!.toStringAsFixed(4)}',
-      if (m.margemFlat != null)  'Margem flat: ${(m.margemFlat! * 100).toStringAsFixed(1)}%',
-      if (m.margemOferta != null)'Margem oferta: ${(m.margemOferta! * 100).toStringAsFixed(1)}%',
-      if (m.clusterId != null)  'Cluster: ${m.clusterId}',
-      if (m.bloqueado)          '⚠ Material bloqueado (LOEVM_KO)',
-      if (m.inativo)            '⚠ Material inativo (KZNEP)',
-    ];
-    return TextSpan(
-      text: lines.join('\n'),
-      style: const TextStyle(fontSize: 12, color: Colors.white, height: 1.7),
-    );
-  }
-
+  // margemFlat/margemOferta são Margem Cliente (usadas para calcular o
+  // preço), não limiar de MC Pole — não fazem sentido como referência do
+  // semáforo aqui. Sem uma margem mínima de MC Pole definida na política,
+  // só distinguimos prejuízo de ok.
   Color _corMargem(double mc, MaterialPreco m) {
     if (mc < 0) return Colors.red.shade900;
-    final mf = m.margemFlatEfetiva;
-    final mo = m.margemOfertaEfetiva;
-    if (mf != null && mc >= mf) return Colors.green;
-    if (mo != null && mc >= mo) return Colors.orange;
-    return Colors.deepOrange;
+    return Colors.green;
   }
 
   Color _corStatus(String status) {
     switch (status) {
-      case 'ok':         return Colors.green;
-      case 'atencao':    return Colors.orange;
-      case 'critico':    return Colors.deepOrange;
-      case 'sem margem': return Colors.red;
-      case 'prejuizo':   return Colors.red.shade900;
-      default:           return Colors.grey.shade300;
+      case 'ok':
+        return Colors.green;
+      case 'atencao':
+        return Colors.orange;
+      case 'critico':
+        return Colors.deepOrange;
+      case 'sem margem':
+        return Colors.red;
+      case 'prejuizo':
+        return Colors.red.shade900;
+      default:
+        return Colors.grey.shade300;
     }
   }
 
   IconData _iconeStatus(String status) {
     switch (status) {
-      case 'ok':         return Icons.check_circle_outline;
-      case 'atencao':    return Icons.warning_amber_outlined;
-      case 'critico':    return Icons.trending_down;
-      case 'prejuizo':   return Icons.money_off;
-      case 'sem margem': return Icons.cancel_outlined;
-      default:           return Icons.help_outline;
+      case 'ok':
+        return Icons.check_circle_outline;
+      case 'atencao':
+        return Icons.warning_amber_outlined;
+      case 'critico':
+        return Icons.trending_down;
+      case 'prejuizo':
+        return Icons.money_off;
+      case 'sem margem':
+        return Icons.cancel_outlined;
+      default:
+        return Icons.help_outline;
     }
   }
 
   String _labelStatus(String status) {
     switch (status) {
-      case 'ok':         return 'margem ok';
-      case 'atencao':    return 'atenção';
-      case 'critico':    return 'abaixo política';
-      case 'prejuizo':   return 'prejuízo';
-      case 'sem margem': return 'sem margem';
-      default:           return 'sem CPV';
+      case 'ok':
+        return 'margem ok';
+      case 'atencao':
+        return 'atenção';
+      case 'critico':
+        return 'abaixo política';
+      case 'prejuizo':
+        return 'prejuízo';
+      case 'sem margem':
+        return 'sem margem';
+      default:
+        return 'sem CPV';
     }
   }
 }
@@ -909,11 +981,7 @@ class _SecaoBox extends StatelessWidget {
   final Color borda;
   final Widget child;
 
-  const _SecaoBox({
-    required this.bg,
-    required this.borda,
-    required this.child,
-  });
+  const _SecaoBox({required this.bg, required this.borda, required this.child});
 
   @override
   Widget build(BuildContext context) {
@@ -961,13 +1029,19 @@ class _Col extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
-            Text(
-              value,
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                fontSize: _valorFontSize,
-                color: color ?? Colors.grey.shade700,
-                fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text(
+                value,
+                textAlign: TextAlign.right,
+                maxLines: 1,
+                softWrap: false,
+                style: TextStyle(
+                  fontSize: _valorFontSize,
+                  color: color ?? Colors.grey.shade700,
+                  fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
+                ),
               ),
             ),
           ],
@@ -1013,14 +1087,18 @@ class _ColInput extends StatelessWidget {
               textAlign: TextAlign.right,
               style: TextStyle(
                 fontSize: _labelFontSize,
-                color: highlight ? _laranja.withOpacity(0.8) : Colors.grey.shade400,
+                color: highlight
+                    ? _laranja.withOpacity(0.8)
+                    : Colors.grey.shade400,
                 fontWeight: highlight ? FontWeight.w700 : FontWeight.normal,
               ),
             ),
             const SizedBox(height: 4),
             TextField(
               controller: controller,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               textAlign: TextAlign.right,
               style: TextStyle(
                 fontSize: _inputFontSize,
@@ -1031,10 +1109,15 @@ class _ColInput extends StatelessWidget {
                 hintText: hint,
                 hintStyle: TextStyle(fontSize: 12, color: Colors.grey.shade400),
                 suffixText: suffix,
-                suffixStyle: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                suffixStyle: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade500,
+                ),
                 isDense: true,
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 7,
+                ),
                 filled: true,
                 fillColor: highlight
                     ? const Color(0xFFFFF3E8)

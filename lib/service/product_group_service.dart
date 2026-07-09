@@ -109,11 +109,19 @@ class ProductGroupService {
         .eq('pricing_cluster_id', clusterId)
         .order('name');
 
+    // 'period' é texto e pode conter formatos legados fora do padrão AAAAMM
+    // (ex: 'MANUAL', '2025.05'), que "vencem" um período real em ordenação
+    // alfabética simples — só considera períodos de 6 dígitos ao escolher
+    // o mais recente.
+    final periodoRegex = RegExp(r'^\d{6}$');
+
     return (res as List).map((p) {
-      final costs = p['product_costs'] as List? ?? [];
-      costs.sort(
-        (a, b) => (b['period'] as String).compareTo(a['period'] as String),
-      );
+      final costs = (p['product_costs'] as List? ?? [])
+          .where((c) => periodoRegex.hasMatch((c['period'] ?? '').toString()))
+          .toList()
+        ..sort(
+          (a, b) => (b['period'] as String).compareTo(a['period'] as String),
+        );
 
       return ClusterProduct(
         code: p['code'] ?? '',
@@ -123,20 +131,5 @@ class ProductGroupService {
             : null,
       );
     }).toList();
-  }
-
-  /// Salva (insert ou update) o CPV de um produto.
-  /// Usa upsert em product_costs pela chave (product_code, period).
-  Future<void> upsertCpv({
-    required String productCode,
-    required double costValue,
-    String period = 'MANUAL',
-  }) async {
-    await supabase.from('product_costs').upsert({
-      'product_code': productCode,
-      'cost_value': costValue,
-      'period': period,
-      'classification': 'MANUAL',
-    }, onConflict: 'product_code,period');
   }
 }

@@ -19,10 +19,13 @@ class SapSyncService {
     String? databOp,
     String? datbiOp,
     String? matnr,
-    String? kznep,      // valor do filtro inativo: 'I' = inativo, null = sem filtro
-    String? kznepOp,    // operador: 'EQ' = apenas inativos, 'NE' = excluir inativos
-    String? loevm,      // valor do filtro bloqueado: 'X' = bloqueado, null = sem filtro
-    String? loevmOp,    // operador: 'EQ' = apenas bloqueados, 'NE' = excluir bloqueados
+    String? kznep, // valor do filtro inativo: 'I' = inativo, null = sem filtro
+    String?
+    kznepOp, // operador: 'EQ' = apenas inativos, 'NE' = excluir inativos
+    String?
+    loevm, // valor do filtro bloqueado: 'X' = bloqueado, null = sem filtro
+    String?
+    loevmOp, // operador: 'EQ' = apenas bloqueados, 'NE' = excluir bloqueados
   }) async {
     final res = await supabase.functions.invoke(
       'swift-handler',
@@ -215,18 +218,72 @@ class SapSyncService {
         p['code'].toString(): p as Map<String, dynamic>,
     };
 
-    // Busca CPV mais recente por material
+    // Busca peso da embalagem/caixa (necessário para PPV/KG e MC Pole) — é
+    // atributo do material, não da lista de preço.
+    final pesoRes = await supabase
+        .from('materials')
+        .select('material_code, peso_unidade, peso_caixa')
+        .inFilter('material_code', matnrs.toList());
+
+    final pesoMap = <String, Map<String, dynamic>>{
+      for (final p in pesoRes as List<dynamic>)
+        p['material_code'].toString(): p as Map<String, dynamic>,
+    };
+
+    // Busca PPC do ciclo aprovado mais recente (histórico), por lista
+    final ppcHistoricoMap = <String, double>{};
+    if (pltyp != null) {
+      final ppcRes = await supabase
+          .from('ppc_historico')
+          .select('product_code, ppc')
+          .eq('pltyp', pltyp)
+          .inFilter('product_code', matnrs.toList());
+      for (final p in ppcRes as List<dynamic>) {
+        final code = p['product_code']?.toString();
+        final ppc = p['ppc'] != null
+            ? double.tryParse(p['ppc'].toString())
+            : null;
+        if (code != null && ppc != null) ppcHistoricoMap[code] = ppc;
+      }
+    }
+
+    // Busca CPV/Ded%/DV% mais recentes por material
     final costsRes = await supabase
         .from('product_costs')
-        .select('product_code, cost_value, period')
-        .inFilter('product_code', matnrs.toList())
-        .order('period', ascending: false);
+        .select('product_code, cost_value, ded_pct, dv_pct, period')
+        .inFilter('product_code', matnrs.toList());
 
-    final cpvMap = <String, double>{};
+    // 'period' é texto e convive com formatos legados ('MANUAL', '2025.05')
+    // que "vencem" um período real (ex: '202607') em ordenação alfabética —
+    // só considera o formato AAAAMM (6 dígitos) para decidir o mais recente.
+    final periodoRegex = RegExp(r'^\d{6}$');
+    final melhorPeriodoPorCodigo = <String, String>{};
     for (final c in costsRes as List<dynamic>) {
       final code = c['product_code'].toString();
-      if (!cpvMap.containsKey(code)) {
+      final periodo = c['period']?.toString();
+      if (periodo == null || !periodoRegex.hasMatch(periodo)) continue;
+      final atual = melhorPeriodoPorCodigo[code];
+      if (atual == null || periodo.compareTo(atual) > 0) {
+        melhorPeriodoPorCodigo[code] = periodo;
+      }
+    }
+
+    final cpvMap = <String, double>{};
+    final dedMap = <String, double>{};
+    final dvMap = <String, double>{};
+    for (final c in costsRes) {
+      final code = c['product_code'].toString();
+      final periodo = c['period']?.toString();
+      if (periodo == null || periodo != melhorPeriodoPorCodigo[code]) continue;
+      if (cpvMap.containsKey(code)) continue; // já preenchido para este período
+      if (c['cost_value'] != null) {
         cpvMap[code] = (c['cost_value'] as num).toDouble();
+      }
+      if (c['ded_pct'] != null) {
+        dedMap[code] = (c['ded_pct'] as num).toDouble();
+      }
+      if (c['dv_pct'] != null) {
+        dvMap[code] = (c['dv_pct'] as num).toDouble();
       }
     }
 
@@ -281,6 +338,7 @@ class SapSyncService {
         final mxwrt = mxwrtRaw != null
             ? double.tryParse(mxwrtRaw.toString())
             : null;
+        final peso = pesoMap[matnr];
 
         result.add(
           MaterialPreco(
@@ -289,12 +347,21 @@ class SapSyncService {
             precoAtual: double.tryParse(kbetr) ?? 0,
             clusterId: product?['pricing_cluster_id']?.toString(),
             cpv: cpvMap[matnr],
+            dedPct: dedMap[matnr],
+            dvPct: dvMap[matnr],
             margemFlat: margemFlat,
             margemOferta: margemOferta,
+            ppcHistorico: ppcHistoricoMap[matnr],
             datab: entryDatab,
             datbi: entryDatbi,
             origemMaterial: OrigemMaterial.sap,
             kgSug: (kgSug != null && kgSug > 0) ? kgSug : null,
+            pesoUnidade: peso?['peso_unidade'] != null
+                ? double.tryParse(peso!['peso_unidade'].toString())
+                : null,
+            pesoCaixa: peso?['peso_caixa'] != null
+                ? double.tryParse(peso!['peso_caixa'].toString())
+                : null,
             konwa: konwa,
             kmein: kmein,
             krech: krech,

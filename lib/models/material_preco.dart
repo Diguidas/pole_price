@@ -6,12 +6,22 @@ class MaterialPreco {
   final double precoAtual; // PPV CX atual (KBETR, valor da caixa)
   final String? clusterId;
 
-  // CPV do período mais recente
+  // CPV do período mais recente (por KG)
   final double? cpv;
 
-  // Margens mínimas da política da lista
-  final double? margemFlat;
-  final double? margemOferta;
+  // Ded% e DV% do período mais recente (vêm da planilha de import, tabela product_costs)
+  final double? dedPct;
+  final double? dvPct;
+
+  // Política: Margem Cliente padrão ("venda padrão") e Margem Cliente da
+  // Oferta ("mínimo promocional") — ambas usadas para calcular o PPV a
+  // partir do PPC (Passos 1 e 9). Não são limiares de MC Pole.
+  final double? margemFlat; // = Margem Cliente padrão da política
+  final double? margemOferta; // = Margem Cliente da Oferta da política
+
+  // PPC do ciclo aprovado mais recente (tabela ppc_historico, por lista).
+  // Sem histórico (produto novo/primeiro ciclo), fica null.
+  final double? ppcHistorico;
 
   // Vigência do preço (formato SAP: YYYYMMDD) — mutável para edição por linha
   String? datab;
@@ -24,7 +34,7 @@ class MaterialPreco {
 
   // Campos SAP para dimensionamento de caixa
   final double? pesoUnidade; // peso por unidade em KG (ex: 0.36)
-  final double? pesoCaixa;   // peso total da caixa em KG (ex: 20.16)
+  final double? pesoCaixa; // peso total da caixa em KG (ex: 20.16)
   final String? unidadeVenda; // ex: 'KG', 'UN', 'CX'
 
   // Campos SAP necessários para o push de volta ao SAP
@@ -48,20 +58,23 @@ class MaterialPreco {
   // ── Overrides de sessão ─────────────────────────────────────────────────
   // Quando o usuário edita um campo calculado, o valor digitado fica aqui.
   // Ao fechar sem salvar, some. Ao salvar draft, persiste junto com o draft.
-  double? ppcNovoOverride;     // PPC novo digitado pelo usuário
-  double? ppcOfertaOverride;   // PPC oferta digitado pelo usuário
+  double? ppcNovoOverride; // PPC novo digitado pelo usuário
+  double? ppcOfertaOverride; // PPC oferta digitado pelo usuário
   double? ppvUnitNovoOverride; // PPV unit novo (quando editado direto)
-  double? reajusteOverride;    // % reajuste (quando editado direto)
-  double? margemFlatOverride;  // margem Pole novo (quando editado direto)
-  double? margemOfertaOverride;// margem Pole oferta (quando editado direto)
+  double? reajusteOverride; // % reajuste (quando editado direto)
+  double? margemFlatOverride; // margem Pole novo (quando editado direto)
+  double? margemOfertaOverride; // margem Pole oferta (quando editado direto)
 
   MaterialPreco({
     required this.codigo,
     required this.description,
     required this.precoAtual,
     this.cpv,
+    this.dedPct,
+    this.dvPct,
     this.margemFlat,
     this.margemOferta,
+    this.ppcHistorico,
     this.clusterId,
     this.datab,
     this.datbi,
@@ -91,18 +104,21 @@ class MaterialPreco {
     final desc = (json['description'] as String?)?.trim().isNotEmpty == true
         ? json['description'] as String
         : (json['maktx'] as String?)?.trim().isNotEmpty == true
-            ? json['maktx'] as String
-            : (json['descricao'] as String?)?.trim().isNotEmpty == true
-                ? json['descricao'] as String
-                : (json['name'] as String?)?.trim() ?? '';
+        ? json['maktx'] as String
+        : (json['descricao'] as String?)?.trim().isNotEmpty == true
+        ? json['descricao'] as String
+        : (json['name'] as String?)?.trim() ?? '';
 
     return MaterialPreco(
       codigo: json['product_id'] ?? '',
       description: desc,
       precoAtual: (json['price'] as num).toDouble(),
       cpv: (json['cpv'] as num?)?.toDouble(),
+      dedPct: (json['ded_pct'] as num?)?.toDouble(),
+      dvPct: (json['dv_pct'] as num?)?.toDouble(),
       margemFlat: (json['margem_flat'] as num?)?.toDouble(),
       margemOferta: (json['margem_oferta'] as num?)?.toDouble(),
+      ppcHistorico: (json['ppc_historico'] as num?)?.toDouble(),
       clusterId: json['pricing_cluster_id'],
       datab: json['datab'],
       datbi: json['datbi'],
@@ -134,20 +150,58 @@ class MaterialPreco {
   /// Alias de compatibilidade (código legado usava fatorUnidade).
   double? get fatorUnidade => fatorConversao;
 
+  double _r2(double v) => (v * 100).round() / 100;
+
+  /// PPV por KG = PPV Unitário ÷ peso da embalagem (kg). Passo 3 da especificação.
+  double? _ppvPorKg(double? ppvUnit) {
+    if (ppvUnit == null || pesoUnidade == null || pesoUnidade! <= 0)
+      return null;
+    return ppvUnit / pesoUnidade!;
+  }
+
+  /// DV R$ = DV% × PPV/KG. Passo 4.
+  double? _dvReais(double? ppvKg) {
+    if (ppvKg == null || dvPct == null) return null;
+    return dvPct! * ppvKg;
+  }
+
+  /// Ded R$ = (PPV/KG − DV R$) × Ded%. Passo 5.
+  double? _dedReais(double? ppvKg, double? dvReais) {
+    if (ppvKg == null || dvReais == null || dedPct == null) return null;
+    return (ppvKg - dvReais) * dedPct!;
+  }
+
+  /// MC R$ Pole = PPV/KG − CPV − Ded R$ − DV R$. Passo 6.
+  double? _mcReais(double? ppvKg, double? dedReais, double? dvReais) {
+    if (ppvKg == null || cpv == null || dedReais == null || dvReais == null) {
+      return null;
+    }
+    return ppvKg - cpv! - dedReais - dvReais;
+  }
+
+  /// MC % Pole = MC R$ ÷ (PPV/KG − Ded R$). Passo 7.
+  double? _mcPct(double? mcReais, double? ppvKg, double? dedReais) {
+    if (mcReais == null || ppvKg == null || dedReais == null) return null;
+    final base = ppvKg - dedReais;
+    if (base <= 0) return null;
+    return mcReais / base;
+  }
+
   // ── Seção ATUAL ──────────────────────────────────────────────────────────
 
-  /// PPV Unitário Atual = PPV_cx_atual / fator_conversao
+  /// PPV Unitário Atual = PPV_cx_atual / fator_conversao (vem do SAP ao vivo).
   double? get ppvUnitAtual {
     final fator = fatorConversao;
-    if (fator == null || fator <= 0) return kgSug ?? (precoAtual > 0 ? precoAtual : null);
+    if (fator == null || fator <= 0)
+      return kgSug ?? (precoAtual > 0 ? precoAtual : null);
     return precoAtual / fator;
   }
 
-  /// PPC Atual — hoje não existe no modelo; retorna null (será digitado).
-  /// Reservado para quando vier do ppc_history.
-  double? get ppcAtual => null;
+  /// PPC Atual — vem do histórico de PPC (lista + vigência) quando existir.
+  /// Sem histórico (produto novo), fica null — não é digitado manualmente.
+  double? get ppcAtual => ppcHistorico;
 
-  /// Margem Cliente Atual = 1 - (PPV_unit_atual / PPC_atual)
+  /// Margem Cliente Atual = 1 - (PPV_unit_atual / PPC_atual). Resultado, não input.
   double? get margemClienteAtual {
     final ppv = ppvUnitAtual;
     final ppc = ppcAtual;
@@ -155,28 +209,22 @@ class MaterialPreco {
     return 1 - (ppv / ppc);
   }
 
-  /// MC R$ Pole Atual = PPV_unit_atual - CPV - deduções - desp_var
-  /// Simplificado: usa apenas CPV por ora (deduções e desp_var não estão no modelo ainda).
-  double? get mcReaisAtual {
-    final ppv = ppvUnitAtual;
-    if (ppv == null || cpv == null) return null;
-    return ppv - cpv!;
-  }
+  double? get ppvKgAtual => _ppvPorKg(ppvUnitAtual);
+  double? get dvReaisAtual => _dvReais(ppvKgAtual);
+  double? get dedReaisAtual => _dedReais(ppvKgAtual, dvReaisAtual);
 
-  /// MC % Pole Atual = MC_R$ / PPV_unit_atual
-  double? get mcPctAtual {
-    final mc = mcReaisAtual;
-    final ppv = ppvUnitAtual;
-    if (mc == null || ppv == null || ppv <= 0) return null;
-    return mc / ppv;
-  }
+  /// MC R$ Pole Atual — Passo 6, calculado sobre o PPV/KG.
+  double? get mcReaisAtual => _mcReais(ppvKgAtual, dedReaisAtual, dvReaisAtual);
+
+  /// MC % Pole Atual — Passo 7.
+  double? get mcPctAtual => _mcPct(mcReaisAtual, ppvKgAtual, dedReaisAtual);
 
   // ── Seção NOVO ───────────────────────────────────────────────────────────
 
-  /// Margem flat efetiva: usa override se o usuário editou, senão usa a da política.
+  /// Margem Cliente efetiva (padrão da política, ou override do usuário no draft).
   double? get margemFlatEfetiva => margemFlatOverride ?? margemFlat;
 
-  /// PPV Unitário Novo = PPC_novo × (1 - margem_flat_pole)
+  /// PPV Unitário Novo = PPC_novo × (1 - Margem Cliente). Passo 1.
   /// Se o usuário editou diretamente o PPV, usa o override.
   double? get ppvUnitNovo {
     if (ppvUnitNovoOverride != null) return ppvUnitNovoOverride;
@@ -186,10 +234,10 @@ class MaterialPreco {
     return ppc * (1 - mf);
   }
 
-  /// PPC Novo efetivo: usa override do usuário se existir.
+  /// PPC Novo — sempre input manual (benchmarking de mercado).
   double? get ppcNovoEfetivo => ppcNovoOverride;
 
-  /// PPV Caixa Novo = PPV_unit_novo × fator_conversao
+  /// PPV Caixa Novo = PPV_unit_novo × fator_conversao. Passo 2.
   double? get ppvCxNovo {
     final ppv = ppvUnitNovo;
     final fator = fatorConversao;
@@ -197,7 +245,8 @@ class MaterialPreco {
     return ppv * fator;
   }
 
-  /// Margem Cliente Novo = 1 - (PPV_unit_novo / PPC_novo)
+  /// Margem Cliente Novo = 1 - (PPV_unit_novo / PPC_novo). Sempre a partir
+  /// do PPC/Margem Cliente deste cenário — nunca derivada do cenário Atual.
   double? get margemClienteNovo {
     final ppv = ppvUnitNovo;
     final ppc = ppcNovoEfetivo;
@@ -205,22 +254,17 @@ class MaterialPreco {
     return 1 - (ppv / ppc);
   }
 
-  /// MC R$ Pole Novo = PPV_unit_novo - CPV
-  double? get mcReaisNovo {
-    final ppv = ppvUnitNovo;
-    if (ppv == null || cpv == null) return null;
-    return ppv - cpv!;
-  }
+  double? get ppvKgNovo => _ppvPorKg(ppvUnitNovo);
+  double? get dvReaisNovo => _dvReais(ppvKgNovo);
+  double? get dedReaisNovo => _dedReais(ppvKgNovo, dvReaisNovo);
 
-  /// MC % Pole Novo = MC_R$_novo / PPV_unit_novo
-  double? get mcPctNovo {
-    final mc = mcReaisNovo;
-    final ppv = ppvUnitNovo;
-    if (mc == null || ppv == null || ppv <= 0) return null;
-    return mc / ppv;
-  }
+  /// MC R$ Pole Novo — Passo 6, calculado sobre o PPV/KG. Nunca é input.
+  double? get mcReaisNovo => _mcReais(ppvKgNovo, dedReaisNovo, dvReaisNovo);
 
-  /// % Reajuste = (PPV_unit_novo / PPV_unit_atual) - 1
+  /// MC % Pole Novo — Passo 7.
+  double? get mcPctNovo => _mcPct(mcReaisNovo, ppvKgNovo, dedReaisNovo);
+
+  /// % Reajuste = (PPV_unit_novo / PPV_unit_atual) - 1. Passo 8.
   double? get reajustePct {
     if (reajusteOverride != null) return reajusteOverride;
     final atual = ppvUnitAtual;
@@ -231,15 +275,18 @@ class MaterialPreco {
 
   // ── Seção OFERTA ─────────────────────────────────────────────────────────
 
-  /// Margem oferta efetiva: usa override se o usuário editou.
+  /// Margem Cliente da Oferta ("mínimo promocional" da política) — mesma
+  /// natureza de margemFlat, só que o valor usado no cenário promocional.
   double? get margemOfertaEfetiva => margemOfertaOverride ?? margemOferta;
 
-  /// PPV Unit Oferta = PPC_oferta × (1 - margem_oferta_pole)
+  /// PPV Unit Oferta = ROUND(PPC × (1 − Margem Cliente Oferta), 2). Passo 9.
+  /// Mesma fórmula do PPV Novo, só troca a margem cliente usada.
+  /// Usa o PPC digitado no cenário Oferta ou, se ausente, o mesmo PPC do Novo.
   double? get ppvUnitOferta {
-    final ppc = ppcOfertaOverride;
-    final mo = margemOfertaEfetiva;
-    if (ppc == null || mo == null) return null;
-    return ppc * (1 - mo);
+    final ppc = ppcOfertaOverride ?? ppcNovoEfetivo;
+    final margem = margemOfertaEfetiva;
+    if (ppc == null || margem == null) return null;
+    return _r2(ppc * (1 - margem));
   }
 
   // ── Cálculos bidirecionais ───────────────────────────────────────────────
@@ -273,23 +320,25 @@ class MaterialPreco {
   ///   - fallback → usa mcPctAtual
   double? get margemReal => mcPctNovo ?? mcPctAtual;
 
-  /// Status de margem baseado na margem Pole % efetiva.
+  /// Status de margem baseado na MC% Pole efetiva, comparada contra a
+  /// Margem Cliente e Margem Oferta da política não são limiares de MC Pole
+  /// (contribuição) — são a margem usada para calcular o preço a partir do
+  /// PPC. Sem uma margem mínima de MC Pole definida na política ainda, o
+  /// semáforo só distingue prejuízo (MC Pole negativa) de ok.
   String get statusMargem {
     final m = margemReal;
     if (m == null) return 'sem-cpv';
     if (m < 0) return 'prejuizo';
     if (m == 0) return 'sem margem';
-    final mf = margemFlatEfetiva;
-    final mo = margemOfertaEfetiva;
-    if (mf != null && m >= mf) return 'ok';
-    if (mo != null && m >= mo) return 'atencao';
-    return 'critico';
+    return 'ok';
   }
 
   /// Margem calculada sobre um preço de CAIXA (para compatibilidade com UI legada).
   double? margemParaPreco(double precoCaixa) {
     final fator = fatorConversao;
-    final preco = (fator != null && fator > 0) ? precoCaixa / fator : precoCaixa;
+    final preco = (fator != null && fator > 0)
+        ? precoCaixa / fator
+        : precoCaixa;
     if (cpv == null || cpv! <= 0 || preco <= 0) return null;
     return (preco - cpv!) / preco;
   }
@@ -299,11 +348,7 @@ class MaterialPreco {
     if (m == null) return 'sem-cpv';
     if (m < 0) return 'prejuizo';
     if (m == 0) return 'sem margem';
-    final mf = margemFlatEfetiva;
-    final mo = margemOfertaEfetiva;
-    if (mf != null && m >= mf) return 'ok';
-    if (mo != null && m >= mo) return 'atencao';
-    return 'critico';
+    return 'ok';
   }
 
   double? get margemSugerida {
@@ -321,6 +366,7 @@ class MaterialPreco {
       if (s == '99991231') return 'aberta';
       return '${s.substring(6, 8)}/${s.substring(4, 6)}/${s.substring(0, 4)}';
     }
+
     final ini = fmt(datab);
     final fim = fmt(datbi);
     if (ini == '?' && fim == '?') return '—';

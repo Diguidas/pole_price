@@ -247,14 +247,15 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
           r['code'].toString(): r as Map<String, dynamic>
       };
 
-      final periodRes = await _supabase
-          .from('product_costs')
-          .select('period')
-          .order('period', ascending: false)
-          .limit(1)
-          .maybeSingle();
-
-      final latestPeriod = periodRes?['period'] as String?;
+      // 'period' é texto e pode conter formatos legados fora do padrão
+      // AAAAMM — só considera períodos de 6 dígitos ao escolher o mais recente.
+      final periodRes = await _supabase.from('product_costs').select('period');
+      final periodoRegex = RegExp(r'^\d{6}$');
+      final latestPeriod = (periodRes as List)
+          .map((r) => r['period']?.toString())
+          .whereType<String>()
+          .where((p) => periodoRegex.hasMatch(p))
+          .fold<String?>(null, (max, p) => (max == null || p.compareTo(max) > 0) ? p : max);
 
       Map<String, double> cpvMap = {};
       if (latestPeriod != null) {
