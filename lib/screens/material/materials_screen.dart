@@ -602,6 +602,7 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
         _th('CPV (R\$)',         flex: 2, align: TextAlign.right),
         _th('DEDUÇÕES',          flex: 2, align: TextAlign.right),
         _th('DESP. VAR.',         flex: 2, align: TextAlign.right),
+        _th('VÍNCULO',           flex: 2, align: TextAlign.center),
         _th('STATUS',            flex: 2, align: TextAlign.center),
       ]),
     );
@@ -659,10 +660,151 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
           style: TextStyle(fontSize: 12, color: m.despesasVarPct != null ? _C.cinzaTexto : Colors.grey.shade400),
         )),
 
+        // Vínculo de preço (pai/filho do agrupamento)
+        Expanded(flex: 2, child: Center(child: _vinculoAcao(m))),
+
         // Status badge
         Expanded(flex: 2, child: Center(child: _badgeStatus(m.status))),
       ]),
     );
+  }
+
+  // ── Vínculo de preço (pai/filho dentro do agrupamento) ────────────────────
+
+  Widget _vinculoAcao(MaterialSap m) {
+    if (m.agrupamentoPreco == null) {
+      return IconButton(
+        icon: Icon(Icons.link_off, size: 16, color: Colors.grey.shade300),
+        tooltip: 'Defina o agrupamento antes de vincular o preço',
+        onPressed: null,
+      );
+    }
+    final excecaoLabel = m.excecaoPrecoPct != null
+        ? '${m.excecaoPrecoPct! >= 0 ? '+' : ''}${(m.excecaoPrecoPct! * 100).toStringAsFixed(1)}%'
+        : '';
+    return Tooltip(
+      message: m.materialPaiCode != null
+          ? 'Segue ${m.materialPaiCode} $excecaoLabel'
+          : 'Definir vínculo de preço',
+      child: IconButton(
+        icon: Icon(
+          m.materialPaiCode != null ? Icons.link : Icons.add_link,
+          size: 18,
+          color: m.materialPaiCode != null ? _C.laranja : _C.cinzaSub,
+        ),
+        onPressed: () => _abrirVinculoDialog(m),
+      ),
+    );
+  }
+
+  Future<void> _abrirVinculoDialog(MaterialSap m) async {
+    final irmaos = _materiais
+        .where((o) =>
+            o.materialCode != m.materialCode &&
+            o.empresa == m.empresa &&
+            o.marca == m.marca &&
+            o.gramatura == m.gramatura &&
+            o.categoria == m.categoria &&
+            o.linha == m.linha &&
+            o.agrupamentoPreco == m.agrupamentoPreco &&
+            o.materialPaiCode == null) // evita chains (pai não pode ser filho)
+        .toList();
+
+    String? paiSelecionado = m.materialPaiCode;
+    final excecaoCtrl = TextEditingController(
+      text: m.excecaoPrecoPct != null
+          ? (m.excecaoPrecoPct! * 100).toStringAsFixed(1)
+          : '',
+    );
+
+    final resultado = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('Vínculo de preço — ${m.materialCode}'),
+          content: SizedBox(
+            width: 380,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Agrupamento: ${m.agrupamentoPreco}',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String?>(
+                  value: paiSelecionado,
+                  decoration: const InputDecoration(
+                    labelText: 'Material pai',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    const DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('Nenhum (remover vínculo)'),
+                    ),
+                    ...irmaos.map(
+                      (o) => DropdownMenuItem<String?>(
+                        value: o.materialCode,
+                        child: Text(
+                          '${o.materialCode} — ${o.description}',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ],
+                  onChanged: (v) => setDialogState(() => paiSelecionado = v),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: excecaoCtrl,
+                  enabled: paiSelecionado != null,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                    signed: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: '% Exceção em relação ao pai',
+                    hintText: 'ex: 10 para +10%, -5 para -5%',
+                    suffixText: '%',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Salvar'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (resultado != true) return;
+
+    final excecaoVal = paiSelecionado != null
+        ? double.tryParse(excecaoCtrl.text.replaceAll(',', '.'))
+        : null;
+
+    try {
+      await _service.salvarVinculoPreco(
+        materialCode: m.materialCode,
+        paiCode: paiSelecionado,
+        excecaoPct: excecaoVal != null ? excecaoVal / 100 : null,
+      );
+      await _carregar();
+      _snack('Vínculo de preço atualizado.');
+    } catch (e) {
+      _snack('Erro ao salvar vínculo: $e', erro: true);
+    }
   }
 
   Widget _valorOuTraco(String? valor) {

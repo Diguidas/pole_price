@@ -147,7 +147,7 @@ class PrecoTopbar extends StatelessWidget {
                       selecionada: controller.selecionada!,
                       materiais: controller.materiais,
                       targets: controller.targets,
-                      regras: controller.regras,
+                      regras: controller.regrasEfetivas,
                     );
                     if (result != null && context.mounted) {
                       try {

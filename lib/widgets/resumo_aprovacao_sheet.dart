@@ -560,32 +560,37 @@ class _ResumoDraftSheetState extends State<_ResumoDraftSheet> {
   Widget _regraChip(RegraAjuste r) {
     final sinal = r.valor >= 0 ? '+' : '';
     final sufixo = r.tipo == 'Percentual' ? '%' : ' R\$';
+    final ehPolitica = r.clusterNome?.startsWith('[Política] ') ?? false;
     final nivelLabel = r.nivel == 'Tabela'
-        ? 'Tabela inteira'
+        ? (ehPolitica ? r.clusterNome! : 'Tabela inteira')
         : r.nivel == 'Grupo'
             ? 'Grupo: ${r.clusterNome ?? r.clusterId ?? ''}'
             : 'Material: ${r.materialNome ?? r.materialId ?? ''}';
+    final cor = ehPolitica ? Colors.teal : Colors.purple;
 
     return Padding(
       padding: const EdgeInsets.only(top: 4, left: 8),
       child: Row(
         children: [
-          Icon(Icons.subdirectory_arrow_right,
-              size: 14, color: Colors.grey.shade400),
+          Icon(
+            ehPolitica ? Icons.account_tree_outlined : Icons.subdirectory_arrow_right,
+            size: 14,
+            color: Colors.grey.shade400,
+          ),
           const SizedBox(width: 4),
           Container(
             padding:
                 const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: Colors.purple.shade50,
+              color: cor.shade50,
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: Colors.purple.shade100),
+              border: Border.all(color: cor.shade100),
             ),
             child: Text(
-              '$nivelLabel  ·  $sinal${r.valor}$sufixo',
+              '$nivelLabel  ·  $sinal${r.valor.toStringAsFixed(2)}$sufixo',
               style: TextStyle(
                   fontSize: 11,
-                  color: Colors.purple.shade700,
+                  color: cor.shade700,
                   fontWeight: FontWeight.w500),
             ),
           ),

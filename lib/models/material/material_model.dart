@@ -18,6 +18,10 @@ class MaterialSap {
   final String? linha;
   final String? agrupamentoPreco;
 
+  // ── Vínculo de preço pai/filho dentro do agrupamento ─────
+  final String? materialPaiCode; // preenchido só quando este material é filho
+  final double? excecaoPrecoPct; // delta % em relação ao pai (ex: 0.10 = +10%)
+
   // ── Custos (editáveis via planilha) ──────────────────────
   final double? cpvReais;
   final double? cpvPct;
@@ -43,6 +47,8 @@ class MaterialSap {
     this.categoria,
     this.linha,
     this.agrupamentoPreco,
+    this.materialPaiCode,
+    this.excecaoPrecoPct,
     this.cpvReais,
     this.cpvPct,
     this.deducoesPct,
@@ -67,6 +73,8 @@ class MaterialSap {
       categoria: json['categoria']?.toString(),
       linha: json['linha']?.toString(),
       agrupamentoPreco: json['agrupamento_preco']?.toString(),
+      materialPaiCode: json['material_pai_code']?.toString(),
+      excecaoPrecoPct: _toDouble(json['excecao_preco_pct']),
       cpvReais: _toDouble(json['cpv_reais']),
       cpvPct: _toDouble(json['cpv_pct']),
       deducoesPct: _toDouble(json['deducoes_pct']),

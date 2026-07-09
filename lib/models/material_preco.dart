@@ -6,6 +6,11 @@ class MaterialPreco {
   final double precoAtual; // PPV CX atual (KBETR, valor da caixa)
   final String? clusterId;
 
+  // ── Vínculo de preço pai/filho dentro do agrupamento ────────────────────
+  final String? agrupamentoPreco;
+  final String? materialPaiCode; // preenchido só quando este material é filho
+  final double? excecaoPrecoPct; // delta % em relação ao pai (ex: 0.10 = +10%)
+
   // CPV do período mais recente (por KG)
   final double? cpv;
 
@@ -61,6 +66,7 @@ class MaterialPreco {
   double? ppcNovoOverride; // PPC novo digitado pelo usuário
   double? ppcOfertaOverride; // PPC oferta digitado pelo usuário
   double? ppvUnitNovoOverride; // PPV unit novo (quando editado direto)
+  double? ppvUnitOfertaOverride; // PPV unit oferta (quando editado direto)
   double? reajusteOverride; // % reajuste (quando editado direto)
   double? margemFlatOverride; // margem Pole novo (quando editado direto)
   double? margemOfertaOverride; // margem Pole oferta (quando editado direto)
@@ -76,6 +82,9 @@ class MaterialPreco {
     this.margemOferta,
     this.ppcHistorico,
     this.clusterId,
+    this.agrupamentoPreco,
+    this.materialPaiCode,
+    this.excecaoPrecoPct,
     this.datab,
     this.datbi,
     this.kgSug,
@@ -93,6 +102,7 @@ class MaterialPreco {
     this.ppcNovoOverride,
     this.ppcOfertaOverride,
     this.ppvUnitNovoOverride,
+    this.ppvUnitOfertaOverride,
     this.reajusteOverride,
     this.margemFlatOverride,
     this.margemOfertaOverride,
@@ -120,6 +130,9 @@ class MaterialPreco {
       margemOferta: (json['margem_oferta'] as num?)?.toDouble(),
       ppcHistorico: (json['ppc_historico'] as num?)?.toDouble(),
       clusterId: json['pricing_cluster_id'],
+      agrupamentoPreco: json['agrupamento_preco']?.toString(),
+      materialPaiCode: json['material_pai_code']?.toString(),
+      excecaoPrecoPct: (json['excecao_preco_pct'] as num?)?.toDouble(),
       datab: json['datab'],
       datbi: json['datbi'],
       kgSug: (json['kg_sug'] as num?)?.toDouble(),
@@ -282,11 +295,21 @@ class MaterialPreco {
   /// PPV Unit Oferta = ROUND(PPC × (1 − Margem Cliente Oferta), 2). Passo 9.
   /// Mesma fórmula do PPV Novo, só troca a margem cliente usada.
   /// Usa o PPC digitado no cenário Oferta ou, se ausente, o mesmo PPC do Novo.
+  /// Se o usuário editou o PPV Unit Oferta diretamente, usa o override.
   double? get ppvUnitOferta {
+    if (ppvUnitOfertaOverride != null) return ppvUnitOfertaOverride;
     final ppc = ppcOfertaOverride ?? ppcNovoEfetivo;
     final margem = margemOfertaEfetiva;
     if (ppc == null || margem == null) return null;
     return _r2(ppc * (1 - margem));
+  }
+
+  /// Calcula PPC Oferta a partir de um PPV Unit Oferta digitado.
+  /// PPC = PPV_unit / (1 - margem_oferta_pole)
+  double? ppcOfertaDePpvUnit(double ppvUnit) {
+    final margem = margemOfertaEfetiva;
+    if (margem == null || margem >= 1) return null;
+    return ppvUnit / (1 - margem);
   }
 
   // ── Cálculos bidirecionais ───────────────────────────────────────────────

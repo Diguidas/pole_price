@@ -49,6 +49,16 @@ class PricingPolicyService {
     }).toList();
   }
 
+  // ── Política de uma lista específica (com listas irmãs) ───────────────────
+
+  Future<PricingPolicy?> getPolicyForLista(String pltyp) async {
+    final policies = await getPolicies();
+    for (final p in policies) {
+      if (p.listas.any((l) => l.pltyp == pltyp)) return p;
+    }
+    return null;
+  }
+
   // ── Todas as listas (para modal de vinculação) ────────────────────────────
 
   Future<List<AllPriceList>> getAllPriceLists() async {

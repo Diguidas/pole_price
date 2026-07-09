@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:pole_price/models/material_preco.dart';
 import 'package:pole_price/models/pricelist_model.dart';
 import 'package:pole_price/models/pricing_cluster_item.dart';
+import 'package:pole_price/models/pricing_policy_model.dart';
 import 'package:pole_price/models/regra_ajuste.dart';
 import 'package:pole_price/service/preco_service.dart';
+import 'package:pole_price/service/pricing_policy_service.dart';
 import 'package:pole_price/service/sap_sync_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -28,7 +30,8 @@ class PrecoController extends ChangeNotifier {
     _instance = null;
   }
 
-  PrecoController._internal(this.service);
+  PrecoController._internal(this.service)
+    : pricingPolicyService = PricingPolicyService(service.supabase);
 
   @override
   void dispose() {
@@ -37,6 +40,7 @@ class PrecoController extends ChangeNotifier {
   }
 
   final PriceService service;
+  final PricingPolicyService pricingPolicyService;
 
   // ── Estado principal ─────────────────────────────────────────────────
   List<PriceList> listas = [];
@@ -45,6 +49,74 @@ class PrecoController extends ChangeNotifier {
 
   List<String> targets = [];
   List<RegraAjuste> regras = [];
+
+  // ── Política da lista mãe (mãe/filha) ─────────────────────────────────
+  PricingPolicy? politicaAtual;
+
+  // ── Vínculo de preço pai/filho dentro do agrupamento ──────────────────
+  // Registry para forçar uma linha específica da tabela a resincronizar seus
+  // TextEditingControllers quando outro material do mesmo agrupamento muda
+  // o PPC Novo dela por tabela (cada _ItemMaterial mantém estado próprio por
+  // ValueKey(codigo), então mutar o MaterialPreco de fora não atualiza o
+  // texto do campo sozinho).
+  final Map<String, VoidCallback> _refreshCallbacks = {};
+  void registerRefresh(String codigo, VoidCallback cb) =>
+      _refreshCallbacks[codigo] = cb;
+  void unregisterRefresh(String codigo) => _refreshCallbacks.remove(codigo);
+  void refreshMaterial(String codigo) => _refreshCallbacks[codigo]?.call();
+
+  /// Aplica o vínculo de preço (pai/filho) do agrupamento de [editado] após
+  /// o PPC Novo dele ter sido alterado: se [editado] é pai, recalcula os
+  /// filhos diretos; se é filho, recalcula o pai e propaga aos irmãos
+  /// (outros filhos do mesmo pai).
+  void aplicarVinculoAgrupamento(MaterialPreco editado) {
+    if (editado.agrupamentoPreco == null) return;
+    final irmaos = materiais
+        .where(
+          (m) =>
+              m.codigo != editado.codigo &&
+              m.agrupamentoPreco == editado.agrupamentoPreco,
+        )
+        .toList();
+
+    if (editado.materialPaiCode == null) {
+      // editado é pai — atualiza filhos diretos
+      for (final filho in irmaos) {
+        if (filho.materialPaiCode == editado.codigo &&
+            filho.excecaoPrecoPct != null) {
+          filho.ppcNovoOverride =
+              (editado.ppcNovoEfetivo ?? 0) * (1 + filho.excecaoPrecoPct!);
+          refreshMaterial(filho.codigo);
+        }
+      }
+      return;
+    }
+
+    // editado é filho — recalcula o pai e propaga aos outros filhos dele
+    final pctEditado = editado.excecaoPrecoPct;
+    if (pctEditado == null || pctEditado == -1) return;
+    MaterialPreco? pai;
+    for (final m in irmaos) {
+      if (m.codigo == editado.materialPaiCode) {
+        pai = m;
+        break;
+      }
+    }
+    if (pai == null) return;
+
+    final novoPaiPpc = (editado.ppcNovoEfetivo ?? 0) / (1 + pctEditado);
+    pai.ppcNovoOverride = novoPaiPpc;
+    refreshMaterial(pai.codigo);
+
+    for (final outro in irmaos) {
+      if (outro.codigo != editado.codigo &&
+          outro.materialPaiCode == pai.codigo &&
+          outro.excecaoPrecoPct != null) {
+        outro.ppcNovoOverride = novoPaiPpc * (1 + outro.excecaoPrecoPct!);
+        refreshMaterial(outro.codigo);
+      }
+    }
+  }
 
   PriceList? selecionada;
 
@@ -335,6 +407,17 @@ class PrecoController extends ChangeNotifier {
     });
   }
 
+  /// Remove vários materiais da sessão de edição de uma vez (seleção múltipla).
+  void removerMateriais(Iterable<MaterialPreco> lista) {
+    for (final m in lista) {
+      m.removido = true;
+    }
+    Future.microtask(() {
+      filtrados = materiais.where((mat) => !mat.removido).toList();
+      notifyListeners();
+    });
+  }
+
   /// Adiciona um material buscado manualmente (origem = manual).
   void adicionarMaterial(MaterialPreco m) {
     materiais.add(m);
@@ -410,6 +493,72 @@ class PrecoController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Busca a Política vinculada à lista mãe atual (`pltyp`) e, quando
+  /// [preencherTargets] é true, popula `targets` automaticamente com as
+  /// demais listas da mesma política (regra mãe/filha). Se a lista mãe não
+  /// pertence a nenhuma política, `politicaAtual` fica null e `targets`
+  /// permanece inalterado (seleção manual, comportamento de hoje).
+  Future<void> sincronizarPoliticaDaListaMae({bool preencherTargets = true}) async {
+    politicaAtual = null;
+    if (pltyp == null) {
+      notifyListeners();
+      return;
+    }
+    politicaAtual = await pricingPolicyService.getPolicyForLista(pltyp!);
+    if (politicaAtual != null && preencherTargets) {
+      targets = politicaAtual!.listas
+          .map((l) => l.pltyp)
+          .where((id) => id != pltyp)
+          .toList();
+    }
+    notifyListeners();
+  }
+
+  /// Gera as regras efetivas para salvar/exibir: as manuais (`regras`) mais
+  /// uma regra automática de exceção de margem por lista filha da política
+  /// atual (nível Tabela, percentual) — reproduz o efeito da exceção de
+  /// margem da Política sem duplicar o mecanismo de RegraAjuste.
+  List<RegraAjuste> get regrasEfetivas {
+    final efetivas = List<RegraAjuste>.from(regras);
+    final politica = politicaAtual;
+    if (politica == null || politica.margemFlat == null) return efetivas;
+
+    PolicyPriceList? maeInfo;
+    for (final l in politica.listas) {
+      if (l.pltyp == pltyp) {
+        maeInfo = l;
+        break;
+      }
+    }
+    final margemMae = politica.margemFlat! + (maeInfo?.excecaoFlatPct ?? 0);
+    if (margemMae >= 1) return efetivas;
+
+    for (final lista in politica.listas) {
+      if (lista.pltyp == pltyp) continue;
+      if (!targets.contains(lista.pltyp)) continue;
+      final jaTemRegraManual = efetivas.any(
+        (r) => r.targetListId == lista.pltyp && r.nivel == 'Tabela',
+      );
+      if (jaTemRegraManual) continue;
+      if (lista.excecaoFlatPct == null || lista.excecaoFlatPct == 0) continue;
+
+      final margemFilha = politica.margemFlat! + lista.excecaoFlatPct!;
+      if (margemFilha >= 1) continue;
+      final deltaPct = ((1 - margemFilha) / (1 - margemMae) - 1) * 100;
+
+      efetivas.add(
+        RegraAjuste(
+          targetListId: lista.pltyp,
+          nivel: 'Tabela',
+          tipo: 'Percentual',
+          valor: deltaPct,
+          clusterNome: '[Política] ${politica.name}',
+        ),
+      );
+    }
+    return efetivas;
+  }
+
   /// [sapStatus]: status SAP a ser gravado em todos os itens do draft.
   ///   '' = ativo/normal, 'L' = bloqueado p/ liberação, 'X' = deletado
   Future<String> salvar({String? justificativa, String sapStatus = ''}) async {
@@ -417,7 +566,7 @@ class PrecoController extends ChangeNotifier {
       masterListId: selecionada?.id,
       materiais: materiais.where((m) => !m.removido).toList(),
       targets: targets,
-      regras: regras,
+      regras: regrasEfetivas,
       modo: modo == SapModo.grupo ? 'grupo' : 'lista',
       kdgrp: kdgrp,
       vigenciaDatab: _toSapDate(vigenciaGlobalDatab),
@@ -436,7 +585,7 @@ class PrecoController extends ChangeNotifier {
       masterListId: selecionada?.id,
       materiais: materiais.where((m) => !m.removido).toList(),
       targets: targets,
-      regras: regras,
+      regras: regrasEfetivas,
       modo: modo == SapModo.grupo ? 'grupo' : 'lista',
       kdgrp: kdgrp,
       vigenciaDatab: _toSapDate(vigenciaGlobalDatab),
@@ -496,11 +645,12 @@ class PrecoController extends ChangeNotifier {
       modo = primeiroItem?['modo'] == 'grupo' ? SapModo.grupo : SapModo.lista;
       kdgrp = primeiroItem?['kdgrp']?.toString();
 
-      // 4. Targets
+      // 4. Targets (restaurados do rascunho salvo — não sobrescrever pela política)
       targets = targetRes
           .map((r) => r['target_list_id']?.toString())
           .whereType<String>()
           .toList();
+      await sincronizarPoliticaDaListaMae(preencherTargets: false);
 
       // 5. Descriptions dos materiais via materials (tem description direto)
       final codigos = itens

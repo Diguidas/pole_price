@@ -98,6 +98,24 @@ class MaterialsService {
     return lista;
   }
 
+  // ── Vínculo de preço (pai/filho dentro do agrupamento) ─────────────────────
+
+  /// Define (ou remove, passando null em ambos) o vínculo de preço de um
+  /// material filho em relação a um material pai do mesmo agrupamento.
+  Future<void> salvarVinculoPreco({
+    required String materialCode,
+    String? paiCode,
+    double? excecaoPct,
+  }) async {
+    await supabase
+        .from('materials')
+        .update({
+          'material_pai_code': paiCode,
+          'excecao_preco_pct': excecaoPct,
+        })
+        .eq('material_code', materialCode);
+  }
+
   // ── Sincronizar SAP ─────────────────────────────────────────────────────────
 
   /// Chama a Edge Function sync-materials.

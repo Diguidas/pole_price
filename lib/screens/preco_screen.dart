@@ -25,6 +25,9 @@ class _PrecoScreenState extends State<PrecoScreen> {
       if (widget.draftId != null) {
         controller.carregarRascunho(widget.draftId!); // ← novo método
       } else {
+        // Sessão nova: popula targets automaticamente com as listas irmãs
+        // da política vinculada à lista mãe (regra mãe/filha), quando houver.
+        controller.sincronizarPoliticaDaListaMae();
         controller.buscarDoSap();
       }
     });

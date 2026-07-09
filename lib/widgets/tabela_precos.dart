@@ -35,6 +35,7 @@ class TabelaPrecos extends StatefulWidget {
 class _TabelaPrecosState extends State<TabelaPrecos> {
   final ScrollController _scrollCtrl = ScrollController();
   String? _filtroAtivo;
+  final Set<String> _selecionados = {};
 
   PrecoController get ctrl => widget.controller;
 
@@ -68,6 +69,39 @@ class _TabelaPrecosState extends State<TabelaPrecos> {
   void _alternarFiltro(String chave) =>
       setState(() => _filtroAtivo = _filtroAtivo == chave ? null : chave);
 
+  void _alternarSelecao(String codigo, bool? valor) {
+    setState(() {
+      if (valor ?? false) {
+        _selecionados.add(codigo);
+      } else {
+        _selecionados.remove(codigo);
+      }
+    });
+  }
+
+  void _alternarSelecionarTodas(List<MaterialPreco> lista) {
+    setState(() {
+      final todasSelecionadas =
+          lista.isNotEmpty &&
+          lista.every((m) => _selecionados.contains(m.codigo));
+      if (todasSelecionadas) {
+        for (final m in lista) {
+          _selecionados.remove(m.codigo);
+        }
+      } else {
+        for (final m in lista) {
+          _selecionados.add(m.codigo);
+        }
+      }
+    });
+  }
+
+  void _excluirSelecionados(List<MaterialPreco> lista) {
+    final alvos = lista.where((m) => _selecionados.contains(m.codigo));
+    ctrl.removerMateriais(alvos);
+    setState(() => _selecionados.clear());
+  }
+
   @override
   void dispose() {
     _scrollCtrl.dispose();
@@ -97,12 +131,16 @@ class _TabelaPrecosState extends State<TabelaPrecos> {
     }
 
     final lista = _listaExibida;
+    final todasSelecionadas =
+        lista.isNotEmpty && lista.every((m) => _selecionados.contains(m.codigo));
 
     return Column(
       children: [
         RepaintBoundary(child: _legenda(ctrl.filtrados)),
         const SizedBox(height: 10),
         _cabecalho(),
+        const SizedBox(height: 6),
+        _barraSelecao(lista, todasSelecionadas),
         const SizedBox(height: 6),
         if (lista.isEmpty)
           Expanded(
@@ -127,15 +165,90 @@ class _TabelaPrecosState extends State<TabelaPrecos> {
                 return _ItemMaterial(
                   key: ValueKey(m.codigo),
                   material: m,
+                  controller: ctrl,
                   isLast: index == lista.length - 1,
                   onChanged: () => setState(() {}),
                   onRemover: () => ctrl.removerMaterial(m),
+                  selecionado: _selecionados.contains(m.codigo),
+                  onSelecionarChanged: (v) => _alternarSelecao(m.codigo, v),
                 );
               },
             ),
           ),
       ],
     );
+  }
+
+  // ── Barra de seleção múltipla ───────────────────────────────────────────────
+
+  Widget _barraSelecao(List<MaterialPreco> lista, bool todasSelecionadas) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 20,
+            height: 20,
+            child: Checkbox(
+              value: todasSelecionadas,
+              onChanged: lista.isEmpty
+                  ? null
+                  : (_) => _alternarSelecionarTodas(lista),
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            'Selecionar todas',
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+          ),
+          if (_selecionados.isNotEmpty) ...[
+            const SizedBox(width: 12),
+            Text(
+              '${_selecionados.length} selecionado(s)',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: _laranja,
+              ),
+            ),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: () => _confirmarExclusao(lista),
+              icon: const Icon(Icons.delete_outline, size: 16),
+              label: const Text('Excluir selecionados'),
+              style: TextButton.styleFrom(foregroundColor: Colors.red.shade700),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmarExclusao(List<MaterialPreco> lista) async {
+    final n = _selecionados.length;
+    final confirmou = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Excluir materiais'),
+        content: Text(
+          'Remover $n material${n == 1 ? '' : 'is'} selecionado${n == 1 ? '' : 's'} desta lista?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+    if (confirmou == true) _excluirSelecionados(lista);
   }
 
   // ── Cabeçalho ──────────────────────────────────────────────────────────────
@@ -383,15 +496,21 @@ class _TabelaPrecosState extends State<TabelaPrecos> {
 
 class _ItemMaterial extends StatefulWidget {
   final MaterialPreco material;
+  final PrecoController controller;
   final VoidCallback onChanged;
   final VoidCallback onRemover;
   final bool isLast;
+  final bool selecionado;
+  final ValueChanged<bool?> onSelecionarChanged;
 
   const _ItemMaterial({
     super.key,
     required this.material,
+    required this.controller,
     required this.onChanged,
     required this.onRemover,
+    required this.selecionado,
+    required this.onSelecionarChanged,
     this.isLast = false,
   });
 
@@ -403,7 +522,10 @@ class _ItemMaterialState extends State<_ItemMaterial> {
   late final TextEditingController _ppcNovoCtrl;
   late final TextEditingController _ppcOfertaCtrl;
   late final TextEditingController _ppvUnitNovoCtrl;
+  late final TextEditingController _ppvCxNovoCtrl;
+  late final TextEditingController _ppvUnitOfertaCtrl;
   late final TextEditingController _reajusteCtrl;
+  late final TextEditingController _reajusteOfertaCtrl;
 
   MaterialPreco get m => widget.material;
 
@@ -425,37 +547,77 @@ class _ItemMaterialState extends State<_ItemMaterial> {
           ? m.ppvUnitNovoOverride!.toStringAsFixed(2)
           : '',
     );
+    _ppvCxNovoCtrl = TextEditingController(
+      text: m.ppvUnitNovoOverride != null && m.ppvCxNovo != null
+          ? m.ppvCxNovo!.toStringAsFixed(2)
+          : '',
+    );
+    _ppvUnitOfertaCtrl = TextEditingController(
+      text: m.ppvUnitOfertaOverride != null
+          ? m.ppvUnitOfertaOverride!.toStringAsFixed(2)
+          : '',
+    );
     _reajusteCtrl = TextEditingController(
       text: m.reajusteOverride != null
           ? (m.reajusteOverride! * 100).toStringAsFixed(2)
           : '',
     );
+    _reajusteOfertaCtrl = TextEditingController();
+    widget.controller.registerRefresh(m.codigo, _resincronizarControllers);
+  }
+
+  /// Resincroniza os campos de texto a partir do modelo — chamado quando o
+  /// vínculo de preço do agrupamento recalcula este material a partir de
+  /// outro (o TextEditingController não muda sozinho quando o override é
+  /// setado de fora, já que o estado da linha sobrevive a rebuilds).
+  void _resincronizarControllers() {
+    setState(() {
+      _ppcNovoCtrl.text = m.ppcNovoOverride != null
+          ? m.ppcNovoOverride!.toStringAsFixed(2)
+          : '';
+      _ppvUnitNovoCtrl.text = m.ppvUnitNovoOverride != null
+          ? m.ppvUnitNovoOverride!.toStringAsFixed(2)
+          : '';
+      final ppvCx = m.ppvCxNovo;
+      _ppvCxNovoCtrl.text = ppvCx != null ? ppvCx.toStringAsFixed(2) : '';
+      final reaj = m.reajustePct;
+      _reajusteCtrl.text = reaj != null
+          ? (reaj * 100).toStringAsFixed(2)
+          : '';
+    });
   }
 
   @override
   void dispose() {
+    widget.controller.unregisterRefresh(m.codigo);
     _ppcNovoCtrl.dispose();
     _ppcOfertaCtrl.dispose();
     _ppvUnitNovoCtrl.dispose();
+    _ppvCxNovoCtrl.dispose();
+    _ppvUnitOfertaCtrl.dispose();
     _reajusteCtrl.dispose();
+    _reajusteOfertaCtrl.dispose();
     super.dispose();
   }
 
   // ── Handlers bidirecionais (inalterados) ──────────────────────────────────
+
+  void _sincronizarPpvCxNovoCtrl() {
+    final ppvCx = m.ppvCxNovo;
+    _ppvCxNovoCtrl.text = ppvCx != null ? ppvCx.toStringAsFixed(2) : '';
+  }
 
   void _onPpcNovoChanged(String v) {
     final val = double.tryParse(v.replaceAll(',', '.'));
     m.ppcNovoOverride = val;
     m.ppvUnitNovoOverride = null;
     m.reajusteOverride = null;
-    if (val != null) {
-      final ppvNovo = m.ppvUnitNovo;
-      if (ppvNovo != null && _ppvUnitNovoCtrl.text.isEmpty) {
-        _ppvUnitNovoCtrl.text = ppvNovo.toStringAsFixed(2);
-      }
-    }
+    final ppvNovo = m.ppvUnitNovo;
+    _ppvUnitNovoCtrl.text = ppvNovo != null ? ppvNovo.toStringAsFixed(2) : '';
+    _sincronizarPpvCxNovoCtrl();
     final ppvCx = m.ppvCxNovo;
     if (ppvCx != null) m.novoPreco = ppvCx;
+    widget.controller.aplicarVinculoAgrupamento(m);
     setState(() {});
     widget.onChanged();
   }
@@ -464,6 +626,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
     _onPpcNovoChanged(v);
     final ppvNovo = m.ppvUnitNovo;
     if (ppvNovo != null) _ppvUnitNovoCtrl.text = ppvNovo.toStringAsFixed(2);
+    _sincronizarPpvCxNovoCtrl();
     final reaj = m.reajustePct;
     if (reaj != null) _reajusteCtrl.text = (reaj * 100).toStringAsFixed(2);
   }
@@ -476,6 +639,28 @@ class _ItemMaterialState extends State<_ItemMaterial> {
       m.ppcNovoOverride = ppcCalculado;
       if (ppcCalculado != null)
         _ppcNovoCtrl.text = ppcCalculado.toStringAsFixed(2);
+    }
+    _sincronizarPpvCxNovoCtrl();
+    final ppvCx = m.ppvCxNovo;
+    if (ppvCx != null) m.novoPreco = ppvCx;
+    setState(() {});
+    widget.onChanged();
+  }
+
+  void _onPpvCxNovoChanged(String v) {
+    final val = double.tryParse(v.replaceAll(',', '.'));
+    final fator = m.fatorConversao;
+    final ppvUnit = (val != null && fator != null && fator > 0)
+        ? val / fator
+        : null;
+    m.ppvUnitNovoOverride = ppvUnit;
+    _ppvUnitNovoCtrl.text = ppvUnit != null ? ppvUnit.toStringAsFixed(2) : '';
+    if (ppvUnit != null) {
+      final ppcCalculado = m.ppcDePpvUnit(ppvUnit);
+      m.ppcNovoOverride = ppcCalculado;
+      if (ppcCalculado != null) {
+        _ppcNovoCtrl.text = ppcCalculado.toStringAsFixed(2);
+      }
     }
     final ppvCx = m.ppvCxNovo;
     if (ppvCx != null) m.novoPreco = ppvCx;
@@ -496,6 +681,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
         if (ppcCalc != null) _ppcNovoCtrl.text = ppcCalc.toStringAsFixed(2);
       }
     }
+    _sincronizarPpvCxNovoCtrl();
     final ppvCx = m.ppvCxNovo;
     if (ppvCx != null) m.novoPreco = ppvCx;
     setState(() {});
@@ -505,6 +691,48 @@ class _ItemMaterialState extends State<_ItemMaterial> {
   void _onPpcOfertaChanged(String v) {
     final val = double.tryParse(v.replaceAll(',', '.'));
     m.ppcOfertaOverride = val;
+    m.ppvUnitOfertaOverride = null;
+    final ppvOferta = m.ppvUnitOferta;
+    _ppvUnitOfertaCtrl.text = ppvOferta != null
+        ? ppvOferta.toStringAsFixed(2)
+        : '';
+    _reajusteOfertaCtrl.clear();
+    setState(() {});
+    widget.onChanged();
+  }
+
+  void _onPpvUnitOfertaChanged(String v) {
+    final val = double.tryParse(v.replaceAll(',', '.'));
+    m.ppvUnitOfertaOverride = val;
+    if (val != null) {
+      final ppcCalculado = m.ppcOfertaDePpvUnit(val);
+      m.ppcOfertaOverride = ppcCalculado;
+      if (ppcCalculado != null) {
+        _ppcOfertaCtrl.text = ppcCalculado.toStringAsFixed(2);
+      }
+    }
+    _reajusteOfertaCtrl.clear();
+    setState(() {});
+    widget.onChanged();
+  }
+
+  void _onReajusteOfertaChanged(String v) {
+    final val = double.tryParse(v.replaceAll(',', '.'));
+    final ppvNovo = m.ppvUnitNovo;
+    final ppvOferta = (val != null && ppvNovo != null)
+        ? ppvNovo * (1 + val / 100)
+        : null;
+    m.ppvUnitOfertaOverride = ppvOferta;
+    _ppvUnitOfertaCtrl.text = ppvOferta != null
+        ? ppvOferta.toStringAsFixed(2)
+        : '';
+    if (ppvOferta != null) {
+      final ppcCalculado = m.ppcOfertaDePpvUnit(ppvOferta);
+      m.ppcOfertaOverride = ppcCalculado;
+      if (ppcCalculado != null) {
+        _ppcOfertaCtrl.text = ppcCalculado.toStringAsFixed(2);
+      }
+    }
     setState(() {});
     widget.onChanged();
   }
@@ -564,6 +792,20 @@ class _ItemMaterialState extends State<_ItemMaterial> {
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Padding(
+              padding: const EdgeInsets.only(right: 4, top: 2),
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: Checkbox(
+                  value: widget.selecionado,
+                  onChanged: widget.onSelecionarChanged,
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -712,13 +954,13 @@ class _ItemMaterialState extends State<_ItemMaterial> {
       borda: _corNovoBorda,
       child: Row(
         children: [
-          // PPV CX (readonly)
-          _Col(
+          // PPV CX (editável)
+          _ColInput(
             label: 'PPV CX',
-            value: ppvCxNovo != null
-                ? 'R\$ ${ppvCxNovo.toStringAsFixed(2)}'
-                : '—',
-            color: ppvCxNovo != null ? Colors.black87 : Colors.grey.shade400,
+            controller: _ppvCxNovoCtrl,
+            hint: ppvCxNovo != null ? ppvCxNovo.toStringAsFixed(2) : '0,00',
+            onChanged: _onPpvCxNovoChanged,
+            onSubmitted: _onPpvCxNovoChanged,
           ),
           // PPV Unit (editável)
           _ColInput(
@@ -736,6 +978,9 @@ class _ItemMaterialState extends State<_ItemMaterial> {
             onChanged: _onPpcNovoChanged,
             onSubmitted: _onPpcNovoConfirmado,
             highlight: true,
+            legenda: m.materialPaiCode != null && m.excecaoPrecoPct != null
+                ? 'segue ${m.materialPaiCode} ${m.excecaoPrecoPct! >= 0 ? '+' : ''}${(m.excecaoPrecoPct! * 100).toStringAsFixed(0)}%'
+                : null,
           ),
           // MC% Cliente
           _Col(
@@ -785,10 +1030,8 @@ class _ItemMaterialState extends State<_ItemMaterial> {
   Widget _secaoOferta() {
     final ppvUnitOferta = m.ppvUnitOferta;
     final reajOferta =
-        (m.ppcOfertaOverride != null &&
-            m.ppvUnitAtual != null &&
-            m.ppvUnitAtual! > 0)
-        ? (ppvUnitOferta != null ? (ppvUnitOferta / m.ppvUnitAtual!) - 1 : null)
+        (ppvUnitOferta != null && m.ppvUnitNovo != null && m.ppvUnitNovo! > 0)
+        ? (ppvUnitOferta / m.ppvUnitNovo!) - 1
         : null;
 
     return _SecaoBox(
@@ -796,25 +1039,28 @@ class _ItemMaterialState extends State<_ItemMaterial> {
       borda: _corOfertaBorda,
       child: Row(
         children: [
-          _Col(
+          _ColInput(
             label: '% Reajuste',
-            value: reajOferta != null
-                ? '${(reajOferta * 100).toStringAsFixed(1)}%'
-                : '—',
+            controller: _reajusteOfertaCtrl,
+            hint: reajOferta != null
+                ? (reajOferta * 100).toStringAsFixed(2)
+                : '0,00',
+            suffix: '%',
+            onChanged: _onReajusteOfertaChanged,
+            onSubmitted: _onReajusteOfertaChanged,
             color: reajOferta != null
                 ? (reajOferta < 0
                       ? Colors.green.shade700
                       : Colors.orange.shade700)
                 : Colors.grey.shade400,
           ),
-          _Col(
+          _ColInput(
             label: 'PPV Unit',
-            value: ppvUnitOferta != null
-                ? 'R\$ ${ppvUnitOferta.toStringAsFixed(2)}'
-                : '—',
-            color: ppvUnitOferta != null
-                ? Colors.green.shade700
-                : Colors.grey.shade400,
+            controller: _ppvUnitOfertaCtrl,
+            hint: ppvUnitOferta != null ? ppvUnitOferta.toStringAsFixed(2) : '0,00',
+            onChanged: _onPpvUnitOfertaChanged,
+            onSubmitted: _onPpvUnitOfertaChanged,
+            color: Colors.green.shade700,
           ),
           _ColInput(
             label: 'PPC Oferta',
@@ -856,13 +1102,18 @@ class _ItemMaterialState extends State<_ItemMaterial> {
                 Icon(_iconeStatus(status), size: 13, color: _corStatus(status)),
                 const SizedBox(width: 3),
                 Flexible(
-                  child: Text(
-                    '${(mcPct * 100).toStringAsFixed(1)}%',
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: _corStatus(status),
-                      fontWeight: FontWeight.bold,
-                      fontSize: _valorFontSize,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      '${(mcPct * 100).toStringAsFixed(1)}%',
+                      maxLines: 1,
+                      softWrap: false,
+                      style: TextStyle(
+                        color: _corStatus(status),
+                        fontWeight: FontWeight.bold,
+                        fontSize: _valorFontSize,
+                      ),
                     ),
                   ),
                 ),
@@ -1061,6 +1312,8 @@ class _ColInput extends StatelessWidget {
   final String? suffix;
   final bool highlight;
   final Color? color;
+  final int flex;
+  final String? legenda;
 
   const _ColInput({
     required this.label,
@@ -1071,11 +1324,14 @@ class _ColInput extends StatelessWidget {
     this.suffix,
     this.highlight = false,
     this.color,
+    this.flex = 1,
+    this.legenda,
   });
 
   @override
   Widget build(BuildContext context) {
     return Expanded(
+      flex: flex,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4),
         child: Column(
@@ -1115,7 +1371,7 @@ class _ColInput extends StatelessWidget {
                 ),
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 8,
+                  horizontal: 6,
                   vertical: 7,
                 ),
                 filled: true,
@@ -1145,6 +1401,14 @@ class _ColInput extends StatelessWidget {
               onChanged: onChanged,
               onSubmitted: onSubmitted,
             ),
+            if (legenda != null) ...[
+              const SizedBox(height: 2),
+              Text(
+                legenda!,
+                textAlign: TextAlign.right,
+                style: TextStyle(fontSize: 9, color: Colors.teal.shade600),
+              ),
+            ],
           ],
         ),
       ),

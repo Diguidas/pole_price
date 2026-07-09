@@ -92,10 +92,25 @@ class PriceService {
               .inFilter('code', codes)
         : Future<dynamic>.value(<dynamic>[]);
 
-    final round2 = await Future.wait<dynamic>([cpvFuture, clusterFuture]);
+    // Vínculo de preço pai/filho + agrupamento — atributo do material (tabela
+    // materials, tela de Materiais), não da lista, então busca por
+    // material_code sem filtrar por price_list_id.
+    final Future<dynamic> vinculoFuture = codes.isNotEmpty
+        ? supabase
+              .from('materials')
+              .select('material_code, agrupamento_preco, material_pai_code, excecao_preco_pct')
+              .inFilter('material_code', codes)
+        : Future<dynamic>.value(<dynamic>[]);
+
+    final round2 = await Future.wait<dynamic>([
+      cpvFuture,
+      clusterFuture,
+      vinculoFuture,
+    ]);
 
     final cpvRes = round2[0] as List;
     final prodRes = round2[1] as List;
+    final vinculoRes = round2[2] as List;
 
     final Map<String, double> cpvMap = {};
     final Map<String, double> dedMap = {};
@@ -124,6 +139,22 @@ class PriceService {
       if (code != null && clusterId != null) clusterMap[code] = clusterId;
     }
 
+    final Map<String, String> agrupamentoMap = {};
+    final Map<String, String> paiMap = {};
+    final Map<String, double> excecaoMap = {};
+    for (final row in vinculoRes) {
+      final code = row['material_code']?.toString();
+      if (code == null) continue;
+      final agr = row['agrupamento_preco']?.toString();
+      if (agr != null) agrupamentoMap[code] = agr;
+      final pai = row['material_pai_code']?.toString();
+      if (pai != null) paiMap[code] = pai;
+      final exc = row['excecao_preco_pct'] != null
+          ? double.tryParse(row['excecao_preco_pct'].toString())
+          : null;
+      if (exc != null) excecaoMap[code] = exc;
+    }
+
     return matsRes.map((m) {
       final code = m['product_id']?.toString() ?? '';
       final double precoTratado = m['price'] != null
@@ -139,6 +170,9 @@ class PriceService {
         margemFlat: margemFlat,
         margemOferta: margemOferta,
         clusterId: clusterMap[code],
+        agrupamentoPreco: agrupamentoMap[code],
+        materialPaiCode: paiMap[code],
+        excecaoPrecoPct: excecaoMap[code],
         // ← Novos campos de dimensionamento
         pesoUnidade: m['peso_unidade'] != null
             ? double.tryParse(m['peso_unidade'].toString())
