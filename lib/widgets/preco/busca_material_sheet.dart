@@ -258,22 +258,59 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
           .fold<String?>(null, (max, p) => (max == null || p.compareTo(max) > 0) ? p : max);
 
       Map<String, double> cpvMap = {};
+      Map<String, double> dedMap = {};
+      Map<String, double> dvMap = {};
       if (latestPeriod != null) {
         final cpvRows = await _supabase
             .from('product_costs')
-            .select('product_code, cost_value')
+            .select('product_code, cost_value, ded_pct, dv_pct')
             .eq('period', latestPeriod)
             .inFilter('product_code', codigosList);
 
         for (final row in cpvRows as List) {
           final code = row['product_code']?.toString();
+          if (code == null) continue;
           final cost = (row['cost_value'] as num?)?.toDouble();
-          if (code != null && cost != null) cpvMap[code] = cost;
+          if (cost != null) cpvMap[code] = cost;
+          final ded = (row['ded_pct'] as num?)?.toDouble();
+          if (ded != null) dedMap[code] = ded;
+          final dv = (row['dv_pct'] as num?)?.toDouble();
+          if (dv != null) dvMap[code] = dv;
         }
       }
 
+      // Vínculo de preço pai/filho + agrupamento + dimensionamento de caixa —
+      // mesmos campos buscados em PriceService.getMaterials. Sem isso, um
+      // material adicionado manualmente nunca calcula PPV/MC (faltando
+      // margem/fator) nem participa do vínculo pai/filho do agrupamento.
+      final materialsRows = await _supabase
+          .from('materials')
+          .select(
+            'material_code, agrupamento_preco, material_pai_code, '
+            'excecao_preco_pct, peso_unidade, peso_caixa, unidade_venda',
+          )
+          .inFilter('material_code', codigosList);
+
+      final Map<String, Map<String, dynamic>> materialsMap = {
+        for (final r in materialsRows as List)
+          if (r['material_code'] != null) r['material_code'].toString(): r,
+      };
+
+      // Margem Cliente (padrão/oferta) da política é da LISTA, não do
+      // material — reaproveita o que já está carregado na sessão em vez de
+      // buscar de novo em price_lists.
+      final margemFlat = widget.controller.materiais
+          .map((m) => m.margemFlat)
+          .whereType<double>()
+          .firstOrNull;
+      final margemOferta = widget.controller.materiais
+          .map((m) => m.margemOferta)
+          .whereType<double>()
+          .firstOrNull;
+
       final materiais = codigosList.map((code) {
         final prod = prodMap[code];
+        final matRow = materialsMap[code];
         final resultadoFallback =
             _resultados.firstWhere((r) => r['code'] == code, orElse: () => {});
 
@@ -285,6 +322,16 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
           precoAtual: 0,
           clusterId: prod?['pricing_cluster_id']?.toString(),
           cpv: cpvMap[code],
+          dedPct: dedMap[code],
+          dvPct: dvMap[code],
+          margemFlat: margemFlat,
+          margemOferta: margemOferta,
+          agrupamentoPreco: matRow?['agrupamento_preco']?.toString(),
+          materialPaiCode: matRow?['material_pai_code']?.toString(),
+          excecaoPrecoPct: (matRow?['excecao_preco_pct'] as num?)?.toDouble(),
+          pesoUnidade: (matRow?['peso_unidade'] as num?)?.toDouble(),
+          pesoCaixa: (matRow?['peso_caixa'] as num?)?.toDouble(),
+          unidadeVenda: matRow?['unidade_venda']?.toString(),
           datab: widget.controller.datab != null
               ? _fmtSap(widget.controller.datab!)
               : null,

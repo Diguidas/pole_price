@@ -218,11 +218,15 @@ class SapSyncService {
         p['code'].toString(): p as Map<String, dynamic>,
     };
 
-    // Busca peso da embalagem/caixa (necessário para PPV/KG e MC Pole) — é
-    // atributo do material, não da lista de preço.
+    // Busca peso da embalagem/caixa (necessário para PPV/KG e MC Pole) e o
+    // vínculo de preço pai/filho + agrupamento — são atributos do material,
+    // não da lista de preço.
     final pesoRes = await supabase
         .from('materials')
-        .select('material_code, peso_unidade, peso_caixa')
+        .select(
+          'material_code, peso_unidade, peso_caixa, '
+          'agrupamento_preco, material_pai_code, excecao_preco_pct',
+        )
         .inFilter('material_code', matnrs.toList());
 
     final pesoMap = <String, Map<String, dynamic>>{
@@ -361,6 +365,11 @@ class SapSyncService {
                 : null,
             pesoCaixa: peso?['peso_caixa'] != null
                 ? double.tryParse(peso!['peso_caixa'].toString())
+                : null,
+            agrupamentoPreco: peso?['agrupamento_preco']?.toString(),
+            materialPaiCode: peso?['material_pai_code']?.toString(),
+            excecaoPrecoPct: peso?['excecao_preco_pct'] != null
+                ? double.tryParse(peso!['excecao_preco_pct'].toString())
                 : null,
             konwa: konwa,
             kmein: kmein,

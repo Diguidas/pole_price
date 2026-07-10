@@ -9,6 +9,7 @@
 
 import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:pole_price/models/material/material_model.dart';
 import 'package:pole_price/service/material/materials_service.dart';
@@ -79,6 +80,11 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
   // Busca dentro da tabela
   final _buscaCtrl = TextEditingController();
 
+  // Caminho (empresa|marca|gramatura|categoria|linha) a auto-expandir na
+  // sidebar quando a busca global encontra um material fora do agrupamento
+  // atualmente selecionado.
+  List<String>? _caminhoParaExpandir;
+
   @override
   void initState() {
     super.initState();
@@ -109,6 +115,28 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
       setState(() => _loading = false);
       _snack('Erro ao carregar materiais: $e', erro: true);
     }
+  }
+
+  // ── Busca global (encontra o material em qualquer lugar da hierarquia) ───
+
+  void _selecionarMaterialGlobal(MaterialSap m) {
+    final emp = m.empresa ?? '(sem empresa)';
+    final mar = m.marca ?? '(sem marca)';
+    final gra = m.gramatura?.toString() ?? '(sem gramatura)';
+    final cat = m.categoria ?? '(sem categoria)';
+    final lin = m.linha ?? '(sem linha)';
+    final agr = m.agrupamentoPreco ?? '(sem agrupamento)';
+
+    setState(() {
+      _empresaSelecionada = emp;
+      _marcaSelecionada = mar;
+      _gramaturaSelecionada = gra;
+      _categoriaSelecionada = cat;
+      _linhaSelecionada = lin;
+      _agrupamentoSelecionado = agr;
+      _caminhoParaExpandir = [emp, mar, gra, cat, lin];
+      _buscaCtrl.clear();
+    });
   }
 
   // ── Materiais exibidos na tabela ─────────────────────────────────────────
@@ -189,11 +217,23 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
                   );
                 }).toList()..sort((a, b) => a.label.compareTo(b.label)),
               );
-            }).toList()..sort((a, b) => a.label.compareTo(b.label)),
+            }).toList()..sort((a, b) => _compararGramatura(a.label, b.label)),
           );
         }).toList()..sort((a, b) => a.label.compareTo(b.label)),
       );
     }).toList()..sort((a, b) => a.label.compareTo(b.label));
+  }
+
+  /// Ordena gramaturas numericamente (100, 200, 1000...) em vez de
+  /// alfabeticamente (que colocaria "1000" antes de "200"). Valores não
+  /// numéricos (ex: "PESO VARIAVEL") vão para o final, em ordem alfabética.
+  static int _compararGramatura(String a, String b) {
+    final na = double.tryParse(a.replaceAll(',', '.'));
+    final nb = double.tryParse(b.replaceAll(',', '.'));
+    if (na != null && nb != null) return na.compareTo(nb);
+    if (na != null) return -1;
+    if (nb != null) return 1;
+    return a.compareTo(b);
   }
 
   // ── Stats ─────────────────────────────────────────────────────────────────
@@ -219,7 +259,7 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
     }
   }
 
-  Future<void> _baixarPlanilha() async {
+  Future<void> _baixarPlanilhaAgrupamento() async {
     if (_materiais.isEmpty) {
       _snack('Sincronize com o SAP primeiro para gerar a planilha.', erro: true);
       return;
@@ -228,8 +268,8 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
     try {
       final bytes = await _service.gerarPlanilhaModelo(_materiais);
       if (!mounted) return;
-      _downloadWeb(bytes, 'pole_price_materiais.csv');
-      _snack('Planilha baixada — preencha e suba de volta.');
+      _downloadWeb(bytes, 'pole_price_agrupamento.xlsx');
+      _snack('Planilha de agrupamento baixada — preencha e suba de volta.');
     } catch (e) {
       if (!mounted) return;
       _snack('Erro ao gerar planilha: $e', erro: true);
@@ -238,8 +278,30 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
     }
   }
 
+  Future<void> _baixarPlanilhaCustos() async {
+    if (_materiais.isEmpty) {
+      _snack('Sincronize com o SAP primeiro para gerar a planilha.', erro: true);
+      return;
+    }
+    setState(() => _baixando = true);
+    try {
+      final bytes = await _service.gerarPlanilhaCustos(_materiais);
+      if (!mounted) return;
+      _downloadWeb(bytes, 'pole_price_custos.xlsx');
+      _snack('Planilha de custos baixada — preencha e suba em "Subir Custos".');
+    } catch (e) {
+      if (!mounted) return;
+      _snack('Erro ao gerar planilha de custos: $e', erro: true);
+    } finally {
+      if (mounted) setState(() => _baixando = false);
+    }
+  }
+
   void _downloadWeb(Uint8List bytes, String filename) {
-    final blob = html.Blob([bytes], 'text/csv;charset=utf-8');
+    final blob = html.Blob(
+      [bytes],
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
     final url = html.Url.createObjectUrlFromBlob(blob);
     final anchor = html.AnchorElement(href: url)
       ..setAttribute('download', filename)
@@ -250,7 +312,7 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
   Future<void> _uploadPlanilha() async {
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['csv'],
+      allowedExtensions: ['xlsx'],
       withData: true,
     );
     if (result == null || result.files.isEmpty) return;
@@ -294,6 +356,7 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
       } else {
         _snack('✓ ${res.atualizados} custos (CPV/Ded/DV) atualizados com sucesso!');
       }
+      await _carregar();
     } catch (e) {
       if (!mounted) return;
       _snack('Erro ao processar planilha de custos: $e', erro: true);
@@ -352,6 +415,70 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
     );
   }
 
+  // ── Botão "Baixar Planilha" (menu: Agrupamento ou Custos) ────────────────
+
+  Widget _botaoBaixarPlanilha() {
+    final desabilitado = _baixando || _materiais.isEmpty;
+    return PopupMenuButton<String>(
+      tooltip: 'Baixar planilha',
+      enabled: !desabilitado,
+      onSelected: (v) {
+        if (v == 'agrupamento') {
+          _baixarPlanilhaAgrupamento();
+        } else {
+          _baixarPlanilhaCustos();
+        }
+      },
+      itemBuilder: (context) => const [
+        PopupMenuItem(
+          value: 'agrupamento',
+          child: Text('Planilha de Agrupamento'),
+        ),
+        PopupMenuItem(
+          value: 'custos',
+          child: Text('Planilha de Custos'),
+        ),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: desabilitado
+                ? _C.cinzaBorda
+                : _C.cinzaSub.withOpacity(0.4),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _baixando
+                ? SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: desabilitado ? _C.cinzaBorda : _C.cinzaSub,
+                    ),
+                  )
+                : Icon(Icons.download_rounded,
+                    size: 16,
+                    color: desabilitado ? _C.cinzaBorda : _C.cinzaSub),
+            const SizedBox(width: 8),
+            Text('Baixar Planilha',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: desabilitado ? _C.cinzaBorda : _C.cinzaSub,
+                )),
+            const SizedBox(width: 4),
+            Icon(Icons.arrow_drop_down_rounded,
+                size: 18, color: desabilitado ? _C.cinzaBorda : _C.cinzaSub),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ── Top bar ───────────────────────────────────────────────────────────────
 
   Widget _topBar() {
@@ -387,11 +514,9 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
                   _BotaoAcao(label: 'Sincronizar SAP', icon: Icons.sync_rounded,
                     loading: _syncando, cor: _C.azulEscuro, onTap: _syncando ? null : _syncSap),
                   const SizedBox(width: 10),
-                  _BotaoAcao(label: 'Baixar Planilha', icon: Icons.download_rounded,
-                    loading: _baixando, cor: _C.cinzaSub, outlined: true,
-                    onTap: (_baixando || _materiais.isEmpty) ? null : _baixarPlanilha),
+                  _botaoBaixarPlanilha(),
                   const SizedBox(width: 10),
-                  _BotaoAcao(label: 'Subir Planilha', icon: Icons.upload_rounded,
+                  _BotaoAcao(label: 'Subir Agrupamento', icon: Icons.upload_rounded,
                     loading: _uploadando, cor: _C.laranja,
                     onTap: (_uploadando || _materiais.isEmpty) ? null : _uploadPlanilha),
                   const SizedBox(width: 10),
@@ -417,6 +542,7 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
         _Sidebar(
           tree: _buildTree(),
           agrupamentoSelecionado: _agrupamentoSelecionado,
+          expandirCaminho: _caminhoParaExpandir,
           onAgrupamentoTap: (emp, mar, gra, cat, lin, agr) {
             setState(() {
               _empresaSelecionada    = emp;
@@ -437,6 +563,11 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                _BuscaGlobalMaterial(
+                  materiais: _materiais,
+                  onSelecionado: _selecionarMaterialGlobal,
+                ),
+                const SizedBox(height: 16),
                 _kpiRow(),
                 const SizedBox(height: 20),
                 if (_agrupamentoSelecionado != null) ...[
@@ -877,11 +1008,221 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
   }
 }
 
+// ── Busca global de material (sugestões enquanto digita) ─────────────────────
+// Ao selecionar uma sugestão, avisa a tela para expandir a hierarquia e
+// selecionar o agrupamento do material encontrado.
+
+class _BuscaGlobalMaterial extends StatefulWidget {
+  final List<MaterialSap> materiais;
+  final void Function(MaterialSap) onSelecionado;
+
+  const _BuscaGlobalMaterial({
+    required this.materiais,
+    required this.onSelecionado,
+  });
+
+  @override
+  State<_BuscaGlobalMaterial> createState() => _BuscaGlobalMaterialState();
+}
+
+class _BuscaGlobalMaterialState extends State<_BuscaGlobalMaterial> {
+  final _ctrl = TextEditingController();
+  final _focusNode = FocusNode();
+  final _layerLink = LayerLink();
+  OverlayEntry? _overlayEntry;
+  List<MaterialSap> _sugestoes = [];
+
+  static const _largura = 380.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode.addListener(_onFocusChange);
+  }
+
+  @override
+  void dispose() {
+    _removerOverlay();
+    _focusNode.removeListener(_onFocusChange);
+    _focusNode.dispose();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _onFocusChange() {
+    if (!_focusNode.hasFocus) {
+      // Pequeno atraso pra deixar o tap na sugestão registrar antes de fechar.
+      Future.delayed(const Duration(milliseconds: 150), () {
+        if (mounted && !_focusNode.hasFocus) _removerOverlay();
+      });
+    }
+  }
+
+  void _onChanged(String texto) {
+    final q = texto.trim().toLowerCase();
+    setState(() {
+      _sugestoes = q.isEmpty
+          ? []
+          : widget.materiais
+              .where((m) =>
+                  m.materialCode.toLowerCase().contains(q) ||
+                  m.description.toLowerCase().contains(q))
+              .take(20)
+              .toList();
+    });
+    if (_sugestoes.isNotEmpty) {
+      _mostrarOverlay();
+    } else {
+      _removerOverlay();
+    }
+  }
+
+  void _mostrarOverlay() {
+    _removerOverlay();
+    final overlay = Overlay.of(context);
+    _overlayEntry = OverlayEntry(
+      builder: (context) => Positioned(
+        width: _largura,
+        child: CompositedTransformFollower(
+          link: _layerLink,
+          showWhenUnlinked: false,
+          offset: const Offset(0, 44),
+          child: Material(
+            elevation: 6,
+            borderRadius: BorderRadius.circular(10),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 320),
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                shrinkWrap: true,
+                itemCount: _sugestoes.length,
+                separatorBuilder: (_, __) =>
+                    const Divider(height: 1, color: _C.cinzaBorda),
+                itemBuilder: (_, i) {
+                  final m = _sugestoes[i];
+                  return InkWell(
+                    onTap: () => _selecionar(m),
+                    child: Padding(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  m.materialCode,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontFamily: 'monospace',
+                                    color: _C.cinzaSub,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                Text(
+                                  m.description,
+                                  style: const TextStyle(
+                                      fontSize: 13, color: _C.cinzaTexto),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                if (m.agrupamentoPreco != null)
+                                  Text(
+                                    m.agrupamentoPreco!,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: _C.laranja,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.north_west_rounded,
+                              size: 14, color: _C.cinzaSub),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    overlay.insert(_overlayEntry!);
+  }
+
+  void _removerOverlay() {
+    _overlayEntry?.remove();
+    _overlayEntry = null;
+  }
+
+  void _selecionar(MaterialSap m) {
+    _removerOverlay();
+    _ctrl.clear();
+    setState(() => _sugestoes = []);
+    _focusNode.unfocus();
+    widget.onSelecionado(m);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CompositedTransformTarget(
+      link: _layerLink,
+      child: SizedBox(
+        width: _largura,
+        child: TextField(
+          controller: _ctrl,
+          focusNode: _focusNode,
+          onChanged: _onChanged,
+          style: const TextStyle(fontSize: 13),
+          decoration: InputDecoration(
+            hintText: 'Buscar material por código ou descrição...',
+            hintStyle: const TextStyle(fontSize: 13, color: _C.cinzaSub),
+            prefixIcon: const Icon(Icons.search_rounded, size: 18, color: _C.cinzaSub),
+            suffixIcon: _ctrl.text.isEmpty
+                ? null
+                : IconButton(
+                    icon: const Icon(Icons.close_rounded, size: 16, color: _C.cinzaSub),
+                    onPressed: () {
+                      _ctrl.clear();
+                      _onChanged('');
+                    },
+                  ),
+            isDense: true,
+            filled: true,
+            fillColor: _C.white,
+            contentPadding: const EdgeInsets.symmetric(vertical: 10),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: _C.cinzaBorda),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: _C.cinzaBorda),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: _C.laranja, width: 1.5),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ── Painel lateral de hierarquia ─────────────────────────────────────────────
 
 class _Sidebar extends StatefulWidget {
   final List<_TreeNode> tree;
   final String? agrupamentoSelecionado;
+  // Caminho (empresa, marca, gramatura, categoria, linha) a auto-expandir —
+  // usado pela busca global para revelar onde um material está na árvore.
+  final List<String>? expandirCaminho;
   final void Function(
     String empresa,
     String? marca,
@@ -895,6 +1236,7 @@ class _Sidebar extends StatefulWidget {
     required this.tree,
     required this.agrupamentoSelecionado,
     required this.onAgrupamentoTap,
+    this.expandirCaminho,
   });
 
   @override
@@ -907,6 +1249,30 @@ class _SidebarState extends State<_Sidebar> {
 
   // Contexto atual da navegação para montar o caminho
   final Map<String, String> _ctx = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _expandirPrefixos(widget.expandirCaminho);
+  }
+
+  @override
+  void didUpdateWidget(covariant _Sidebar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.expandirCaminho != null &&
+        !listEquals(widget.expandirCaminho, oldWidget.expandirCaminho)) {
+      setState(() => _expandirPrefixos(widget.expandirCaminho));
+    }
+  }
+
+  void _expandirPrefixos(List<String>? caminho) {
+    if (caminho == null) return;
+    var acumulado = '';
+    for (final parte in caminho) {
+      acumulado = acumulado.isEmpty ? parte : '$acumulado|$parte';
+      _expandidos.add(acumulado);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

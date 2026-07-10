@@ -1,12 +1,10 @@
 // lib/service/materials_service.dart
 
-import 'dart:convert';
 import 'dart:typed_data';
-import 'package:archive/archive.dart';
+import 'package:excel/excel.dart';
 import 'package:flutter/foundation.dart';
 import 'package:pole_price/models/material/material_model.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:xml/xml.dart';
 
 class MaterialsService {
   final SupabaseClient supabase;
@@ -138,10 +136,10 @@ class MaterialsService {
     );
   }
 
-  // ── Download planilha modelo ────────────────────────────────────────────────
+  // ── Download planilha modelo (agrupamento + vínculo) ────────────────────────
 
-  /// Gera o CSV modelo para preenchimento da hierarquia e custos.
-  /// Retorna os bytes do CSV.
+  /// Gera a planilha .xlsx para preenchimento da hierarquia e do vínculo de
+  /// preço pai/filho. Retorna os bytes do arquivo.
   Future<Uint8List> gerarPlanilhaModelo(List<MaterialSap> materiais) async {
     final header = [
       'material_code',
@@ -158,98 +156,140 @@ class MaterialsService {
       'categoria',
       'linha',
       'agrupamento_preco',
-      // Custos — editáveis
-      'cpv_reais',
-      'cpv_pct',
-      'deducoes_pct',
-      'deducoes_reais',
-      'despesas_var_pct',
-      'despesas_var_reais',
+      // Vínculo de preço pai/filho — editáveis. excecao_preco_pct em número
+      // percentual (ex: 20 = +20%, -5 = -5%), igual ao diálogo de vínculo da
+      // tela de Materiais — não é a fração salva no banco (0,20).
+      'material_pai_code',
+      'excecao_preco_pct',
     ];
 
-    final linhas = <List<String>>[header];
+    final excel = Excel.createExcel();
+    final nomeAba = excel.getDefaultSheet()!;
+    final sheet = excel[nomeAba];
+
+    sheet.appendRow(header.map((h) => TextCellValue(h)).toList());
 
     for (final m in materiais) {
-      linhas.add([
-        m.materialCode,
-        m.description,
-        m.unidadeVenda ?? '',
-        m.pesoUnidade?.toString() ?? '',
-        m.pesoCaixa?.toString() ?? '',
-        m.fatorConversao?.toStringAsFixed(4) ?? '',
-        m.empresa ?? '',
-        m.marca ?? '',
-        m.gramatura ?? '',
-        m.categoria ?? '',
-        m.linha ?? '',
-        m.agrupamentoPreco ?? '',
-        m.cpvReais?.toStringAsFixed(4) ?? '',
-        m.cpvPct?.toStringAsFixed(4) ?? '',
-        m.deducoesPct?.toStringAsFixed(4) ?? '',
-        m.deducoesReais?.toStringAsFixed(4) ?? '',
-        m.despesasVarPct?.toStringAsFixed(4) ?? '',
-        m.despesasVarReais?.toStringAsFixed(4) ?? '',
+      sheet.appendRow([
+        TextCellValue(m.materialCode),
+        TextCellValue(m.description),
+        TextCellValue(m.unidadeVenda ?? ''),
+        TextCellValue(m.pesoUnidade?.toString() ?? ''),
+        TextCellValue(m.pesoCaixa?.toString() ?? ''),
+        TextCellValue(m.fatorConversao?.toStringAsFixed(4) ?? ''),
+        TextCellValue(m.empresa ?? ''),
+        TextCellValue(m.marca ?? ''),
+        TextCellValue(m.gramatura ?? ''),
+        TextCellValue(m.categoria ?? ''),
+        TextCellValue(m.linha ?? ''),
+        TextCellValue(m.agrupamentoPreco ?? ''),
+        TextCellValue(m.materialPaiCode ?? ''),
+        TextCellValue(
+          m.excecaoPrecoPct != null
+              ? (m.excecaoPrecoPct! * 100).toStringAsFixed(2)
+              : '',
+        ),
       ]);
     }
 
-    final csv = linhas
-        .map((row) {
-          return row
-              .map((cell) {
-                // Escapa células com ponto-e-vírgula ou aspas
-                if (cell.contains(';') ||
-                    cell.contains('"') ||
-                    cell.contains('\n')) {
-                  return '"${cell.replaceAll('"', '""')}"';
-                }
-                return cell;
-              })
-              .join(';');
-        })
-        .join('\n');
+    final bytes = excel.encode();
+    if (bytes == null) throw Exception('Falha ao gerar a planilha.');
+    return Uint8List.fromList(bytes);
+  }
 
-    // BOM para Excel abrir UTF-8 corretamente
-    final bom = [0xEF, 0xBB, 0xBF];
-    final bytes = utf8.encode(csv);
-    return Uint8List.fromList([...bom, ...bytes]);
+  // ── Download planilha de custos (CPV / Dedução / Despesa) ───────────────────
+
+  /// Gera a planilha .xlsx de custos pré-preenchida com o CPV/Dedução%/
+  /// Despesa Var% mais recentes de cada material (quando existirem), no
+  /// mesmo formato aceito por [processarUploadCustos] (Periodo/Cod/Material/
+  /// Valor/Dedução/Despesa).
+  Future<Uint8List> gerarPlanilhaCustos(List<MaterialSap> materiais) async {
+    final codigos = materiais.map((m) => m.materialCode).toList();
+
+    final custosRes = codigos.isEmpty
+        ? <dynamic>[]
+        : await supabase
+            .from('product_costs')
+            .select('product_code, cost_value, ded_pct, dv_pct, period')
+            .inFilter('product_code', codigos);
+
+    // Mesma lógica de "período mais recente" usada em listar().
+    final periodoRegex = RegExp(r'^\d{6}$');
+    final melhorPeriodoPorCodigo = <String, String>{};
+    for (final c in custosRes) {
+      final code = c['product_code']?.toString();
+      final periodo = c['period']?.toString();
+      if (code == null || periodo == null || !periodoRegex.hasMatch(periodo)) {
+        continue;
+      }
+      final atual = melhorPeriodoPorCodigo[code];
+      if (atual == null || periodo.compareTo(atual) > 0) {
+        melhorPeriodoPorCodigo[code] = periodo;
+      }
+    }
+
+    final Map<String, Map<String, dynamic>> custoPorCodigo = {};
+    for (final c in custosRes) {
+      final code = c['product_code']?.toString();
+      final periodo = c['period']?.toString();
+      if (code == null || periodo != melhorPeriodoPorCodigo[code]) continue;
+      custoPorCodigo[code] = c;
+    }
+
+    final excel = Excel.createExcel();
+    final nomeAba = excel.getDefaultSheet()!;
+    final sheet = excel[nomeAba];
+
+    sheet.appendRow(
+      ['Periodo', 'Cod', 'Material', 'Valor', 'Dedução', 'Despesa']
+          .map((h) => TextCellValue(h))
+          .toList(),
+    );
+
+    // Dedução%/Despesa% ficam em número percentual (5 = 5%) — mesmo formato
+    // que o financeiro já usa; a fração (0,05) é só o que fica salvo no banco.
+    String pctOuVazio(dynamic v) {
+      final d = v != null ? double.tryParse(v.toString()) : null;
+      return d != null ? (d * 100).toStringAsFixed(2) : '';
+    }
+
+    for (final m in materiais) {
+      final c = custoPorCodigo[m.materialCode];
+      sheet.appendRow([
+        TextCellValue(c?['period']?.toString() ?? ''),
+        TextCellValue(m.materialCode),
+        TextCellValue(m.description),
+        TextCellValue(c?['cost_value']?.toString() ?? ''),
+        TextCellValue(pctOuVazio(c?['ded_pct'])),
+        TextCellValue(pctOuVazio(c?['dv_pct'])),
+      ]);
+    }
+
+    final bytes = excel.encode();
+    if (bytes == null) throw Exception('Falha ao gerar a planilha de custos.');
+    return Uint8List.fromList(bytes);
   }
 
   // ── Upload e parse da planilha ──────────────────────────────────────────────
 
-  /// Lê o CSV enviado pelo usuário e faz upsert em materials.
+  /// Lê o .xlsx enviado pelo usuário e faz upsert em materials.
   /// Retorna { atualizados, erros, mensagensErro }
   Future<UploadResult> processarUpload(Uint8List bytes) async {
-    // Remove BOM se existir
-    final hasBom =
-        bytes.length >= 3 &&
-        bytes[0] == 0xEF &&
-        bytes[1] == 0xBB &&
-        bytes[2] == 0xBF;
-
-    var content = utf8.decode(
-      hasBom ? bytes.sublist(3) : bytes,
-      allowMalformed: true,
-    );
-
-    // Remove \r para compatibilidade com arquivos gerados no Windows/Excel
-    content = content.replaceAll('\r', '');
-
-    final linhas = content
-        .split('\n')
-        .where((l) => l.trim().isNotEmpty)
+    final linhas = _readXlsxRows(bytes)
+        .where((l) => l.any((c) => c.trim().isNotEmpty))
         .toList();
     if (linhas.length < 2) {
       throw Exception('Planilha vazia ou sem dados além do cabeçalho.');
     }
 
-    final header = _parseCsvLine(linhas[0]);
+    final header = linhas[0];
     final idx = _buildIndex(header);
 
     final erros = <String>[];
     final registros = <Map<String, dynamic>>[];
 
     for (var i = 1; i < linhas.length; i++) {
-      final cols = _parseCsvLine(linhas[i]);
+      final cols = linhas[i];
       final code = _col(cols, idx, 'material_code');
       if (code.isEmpty) {
         erros.add('Linha ${i + 1}: material_code vazio — ignorado.');
@@ -265,26 +305,45 @@ class MaterialsService {
         if (v.isNotEmpty) rec[col] = v;
       }
 
-      void addNum(String col) {
-        final v = _col(cols, idx, col);
-        if (v.isNotEmpty) {
-          final d = double.tryParse(v.replaceAll(',', '.'));
-          if (d != null) rec[col] = d;
-        }
-      }
-
       addStr('empresa');
       addStr('marca');
       addStr('gramatura');
       addStr('categoria');
       addStr('linha');
       addStr('agrupamento_preco');
-      addNum('cpv_reais');
-      addNum('cpv_pct');
-      addNum('deducoes_pct');
-      addNum('deducoes_reais');
-      addNum('despesas_var_pct');
-      addNum('despesas_var_reais');
+
+      // material_pai_code: string vazia explícita remove o vínculo; ausente
+      // na planilha (coluna não preenchida em nenhuma linha) não mexe.
+      final paiCol = _col(cols, idx, 'material_pai_code');
+      if (idx.containsKey('material_pai_code')) {
+        if (paiCol.isEmpty) {
+          rec['material_pai_code'] = null;
+        } else if (paiCol == code) {
+          erros.add(
+            'Linha ${i + 1}: material_pai_code não pode ser o próprio material ($code) — ignorado.',
+          );
+        } else {
+          rec['material_pai_code'] = paiCol;
+        }
+      }
+
+      // excecao_preco_pct vem em número percentual (20 = +20%) — converte
+      // para a fração salva no banco (0,20).
+      final excCol = _col(cols, idx, 'excecao_preco_pct');
+      if (idx.containsKey('excecao_preco_pct')) {
+        if (excCol.isEmpty) {
+          rec['excecao_preco_pct'] = null;
+        } else {
+          final pct = double.tryParse(excCol.replaceAll(',', '.'));
+          if (pct == null) {
+            erros.add(
+              'Linha ${i + 1}: excecao_preco_pct inválido ("$excCol") — ignorado.',
+            );
+          } else {
+            rec['excecao_preco_pct'] = pct / 100;
+          }
+        }
+      }
 
       registros.add(rec);
     }
@@ -366,6 +425,13 @@ class MaterialsService {
       return double.tryParse(v.replaceAll(',', '.'));
     }
 
+    // Dedução/Despesa vêm em número percentual (5 = 5%) — converte para a
+    // fração salva no banco (0,05), que é o que o motor de preço espera.
+    double? cellPct(List<String> row, int i) {
+      final v = cellNum(row, i);
+      return v != null ? v / 100 : null;
+    }
+
     final erros = <String>[];
     // Mapa por (product_code, period) — deduplica dentro do lote, já que o
     // Postgres rejeita upsert com a mesma chave duas vezes na mesma chamada.
@@ -400,8 +466,8 @@ class MaterialsService {
         'product_code': cod,
         'period': periodo,
         'cost_value': cpv,
-        'ded_pct': cellNum(row, idxDeducao),
-        'dv_pct': cellNum(row, idxDespesa),
+        'ded_pct': cellPct(row, idxDeducao),
+        'dv_pct': cellPct(row, idxDespesa),
       };
     }
 
@@ -460,121 +526,23 @@ class MaterialsService {
     );
   }
 
-  // ── Leitura mínima de .xlsx (bypassa o parser de estilos, só extrai valores) ─
+  // ── Leitura de .xlsx (via pacote excel) ──────────────────────────────────
 
-  /// Descompacta o .xlsx e lê a primeira planilha diretamente do XML
-  /// (xl/worksheets/sheetN.xml + xl/sharedStrings.xml), sem depender de
-  /// bibliotecas que tentam interpretar formatação/estilo de número.
+  /// Lê a primeira planilha de um arquivo .xlsx e retorna as linhas como
+  /// texto puro, já convertendo os tipos de célula (texto/número/data) do
+  /// pacote `excel` para string.
   List<List<String>> _readXlsxRows(Uint8List bytes) {
-    final archive = ZipDecoder().decodeBytes(bytes);
-
-    ArchiveFile? findFile(bool Function(String) match) {
-      for (final f in archive.files) {
-        if (f.isFile && match(f.name)) return f;
-      }
-      return null;
-    }
-
-    String xmlOf(ArchiveFile file) =>
-        utf8.decode(file.content as List<int>, allowMalformed: true);
-
-    // Shared strings (texto reaproveitado entre células)
-    final sharedStrings = <String>[];
-    final sharedStringsFile = findFile((n) => n == 'xl/sharedStrings.xml');
-    if (sharedStringsFile != null) {
-      final doc = XmlDocument.parse(xmlOf(sharedStringsFile));
-      for (final si in doc.findAllElements('si')) {
-        final texto = si.findElements('t').isNotEmpty
-            ? si.findElements('t').first.innerText
-            : si.findAllElements('t').map((t) => t.innerText).join();
-        sharedStrings.add(texto);
-      }
-    }
-
-    final sheetFiles =
-        archive.files
-            .where((f) => f.isFile &&
-                RegExp(r'^xl/worksheets/sheet\d+\.xml$').hasMatch(f.name))
-            .toList()
-          ..sort((a, b) => a.name.compareTo(b.name));
-    final sheetFile = sheetFiles.isNotEmpty ? sheetFiles.first : null;
-    if (sheetFile == null) {
+    final excel = Excel.decodeBytes(bytes);
+    if (excel.tables.isEmpty) {
       throw Exception('Nenhuma planilha encontrada dentro do arquivo .xlsx.');
     }
-
-    final sheetDoc = XmlDocument.parse(xmlOf(sheetFile));
-    final rows = <List<String>>[];
-
-    for (final rowEl in sheetDoc.findAllElements('row')) {
-      final rowValues = <String>[];
-      for (final cellEl in rowEl.findElements('c')) {
-        final ref = cellEl.getAttribute('r') ?? '';
-        final colIndex = _xlsxColumnIndex(ref);
-
-        String value = '';
-        final type = cellEl.getAttribute('t');
-        if (type == 's') {
-          final v = cellEl.findElements('v');
-          final i = v.isNotEmpty ? int.tryParse(v.first.innerText) : null;
-          value = (i != null && i >= 0 && i < sharedStrings.length)
-              ? sharedStrings[i]
-              : '';
-        } else if (type == 'inlineStr') {
-          value = cellEl.findAllElements('t').map((t) => t.innerText).join();
-        } else {
-          final v = cellEl.findElements('v');
-          value = v.isNotEmpty ? v.first.innerText : '';
-        }
-
-        while (rowValues.length <= colIndex) {
-          rowValues.add('');
-        }
-        rowValues[colIndex] = value;
-      }
-      rows.add(rowValues);
-    }
-
-    return rows;
+    final sheet = excel.tables[excel.tables.keys.first]!;
+    return sheet.rows
+        .map((row) => row.map((cell) => cell?.value?.toString() ?? '').toList())
+        .toList();
   }
 
-  /// Converte uma referência de célula ("C5", "AB12") no índice de coluna
-  /// 0-based ("C" → 2, "AB" → 27).
-  int _xlsxColumnIndex(String cellRef) {
-    var idx = 0;
-    for (final char in cellRef.split('')) {
-      final code = char.codeUnitAt(0);
-      if (code < 65 || code > 90) break; // só letras (A-Z) contam
-      idx = idx * 26 + (code - 64);
-    }
-    return idx - 1;
-  }
-
-  // ── CSV helpers ─────────────────────────────────────────────────────────────
-
-  List<String> _parseCsvLine(String line) {
-    final result = <String>[];
-    var inQuotes = false;
-    final current = StringBuffer();
-
-    for (var i = 0; i < line.length; i++) {
-      final c = line[i];
-      if (c == '"') {
-        if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
-          current.write('"');
-          i++;
-        } else {
-          inQuotes = !inQuotes;
-        }
-      } else if (c == ';' && !inQuotes) {
-        result.add(current.toString().trim());
-        current.clear();
-      } else {
-        current.write(c);
-      }
-    }
-    result.add(current.toString().trim());
-    return result;
-  }
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
   Map<String, int> _buildIndex(List<String> header) {
     return {

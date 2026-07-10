@@ -86,6 +86,7 @@ class PrecoController extends ChangeNotifier {
             filho.excecaoPrecoPct != null) {
           filho.ppcNovoOverride =
               (editado.ppcNovoEfetivo ?? 0) * (1 + filho.excecaoPrecoPct!);
+          _sincronizarNovoPreco(filho);
           refreshMaterial(filho.codigo);
         }
       }
@@ -106,6 +107,7 @@ class PrecoController extends ChangeNotifier {
 
     final novoPaiPpc = (editado.ppcNovoEfetivo ?? 0) / (1 + pctEditado);
     pai.ppcNovoOverride = novoPaiPpc;
+    _sincronizarNovoPreco(pai);
     refreshMaterial(pai.codigo);
 
     for (final outro in irmaos) {
@@ -113,9 +115,19 @@ class PrecoController extends ChangeNotifier {
           outro.materialPaiCode == pai.codigo &&
           outro.excecaoPrecoPct != null) {
         outro.ppcNovoOverride = novoPaiPpc * (1 + outro.excecaoPrecoPct!);
+        _sincronizarNovoPreco(outro);
         refreshMaterial(outro.codigo);
       }
     }
+  }
+
+  /// Propaga o PPC Novo recalculado para `novoPreco` — é esse campo (não o
+  /// override) que o fluxo de "Salvar para aprovação" usa para decidir o que
+  /// entra no rascunho. Sem isso, o material vinculado recalcula na tela mas
+  /// some do rascunho salvo (aparece como "Sem alteração" no Histórico).
+  void _sincronizarNovoPreco(MaterialPreco m) {
+    final ppvCx = m.ppvCxNovo;
+    if (ppvCx != null) m.novoPreco = ppvCx;
   }
 
   PriceList? selecionada;
@@ -363,6 +375,9 @@ class PrecoController extends ChangeNotifier {
                   margemOferta: m.margemOferta,
                   ppcHistorico: m.ppcHistorico,
                   clusterId: clusterMap[m.codigo],
+                  agrupamentoPreco: m.agrupamentoPreco,
+                  materialPaiCode: m.materialPaiCode,
+                  excecaoPrecoPct: m.excecaoPrecoPct,
                   datab: m.datab,
                   datbi: m.datbi,
                   kgSug: m.kgSug,
@@ -682,13 +697,35 @@ class PrecoController extends ChangeNotifier {
         }
       }
 
+      // Vínculo de preço pai/filho + agrupamento — atributo do material
+      // (tabela materials, coluna material_code), não da lista.
+      final Map<String, Map<String, dynamic>> vinculoMap = {};
+      if (codigos.isNotEmpty) {
+        final vinculoRes = await service.supabase
+            .from('materials')
+            .select(
+              'material_code, agrupamento_preco, material_pai_code, excecao_preco_pct',
+            )
+            .inFilter('material_code', codigos);
+        for (final r in vinculoRes as List) {
+          final code = r['material_code']?.toString();
+          if (code != null) vinculoMap[code] = r;
+        }
+      }
+
       // 6. Monta materiais
       materiais = itens.map((row) {
         final codigo = row['product_id']?.toString() ?? '';
+        final vinculo = vinculoMap[codigo];
         return MaterialPreco(
           codigo: codigo,
           description: descMap[codigo] ?? codigo,
           precoAtual: double.tryParse(row['old_price'].toString()) ?? 0,
+          agrupamentoPreco: vinculo?['agrupamento_preco']?.toString(),
+          materialPaiCode: vinculo?['material_pai_code']?.toString(),
+          excecaoPrecoPct: vinculo?['excecao_preco_pct'] != null
+              ? double.tryParse(vinculo!['excecao_preco_pct'].toString())
+              : null,
           novoPreco: (row['price_edited'] == true)
               ? double.tryParse(row['new_price'].toString()) ?? 0
               : 0,
@@ -760,6 +797,9 @@ class PrecoController extends ChangeNotifier {
                 margemOferta: m.margemOferta,
                 ppcHistorico: m.ppcHistorico,
                 clusterId: clusterMap[m.codigo],
+                agrupamentoPreco: m.agrupamentoPreco,
+                materialPaiCode: m.materialPaiCode,
+                excecaoPrecoPct: m.excecaoPrecoPct,
                 datab: m.datab,
                 datbi: m.datbi,
                 kgSug: m.kgSug,
@@ -774,6 +814,10 @@ class PrecoController extends ChangeNotifier {
                 origemMaterial: m.origemMaterial,
                 bloqueado: m.bloqueado,
                 inativo: m.inativo,
+                ppcNovoOverride: m.ppcNovoOverride,
+                ppcOfertaOverride: m.ppcOfertaOverride,
+                margemFlatOverride: m.margemFlatOverride,
+                margemOfertaOverride: m.margemOfertaOverride,
               ),
             )
             .toList();

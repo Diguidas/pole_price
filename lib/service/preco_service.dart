@@ -94,7 +94,9 @@ class PriceService {
 
     // Vínculo de preço pai/filho + agrupamento — atributo do material (tabela
     // materials, tela de Materiais), não da lista, então busca por
-    // material_code sem filtrar por price_list_id.
+    // material_code sem filtrar por price_list_id. A coluna correta é
+    // material_code — a tabela materials não tem coluna product_id (só
+    // material_code, usada em sap_sync_service e draft_pricing_service).
     final Future<dynamic> vinculoFuture = codes.isNotEmpty
         ? supabase
               .from('materials')

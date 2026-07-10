@@ -1,6 +1,10 @@
 // historico_draft_detail_screen.dart
+import 'dart:html' as html;
+import 'dart:typed_data';
+import 'package:excel/excel.dart' hide Border, TextSpan;
 import 'package:flutter/material.dart';
 import 'package:pole_price/models/material_draft_preview.dart';
+import 'package:pole_price/models/material_preco.dart';
 import 'package:pole_price/service/draft_pricing_service.dart';
 import 'package:pole_price/widgets/preco/material_preco_card_view.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -146,6 +150,101 @@ class _HistoricoDraftDetailScreenState
     final origem = item['origem']?.toString() ?? '';
     if (origem.startsWith('Reajuste')) return 'Exceção manual';
     return 'Alterado';
+  }
+
+  // ── Exportar para Excel ──────────────────────────────────────────────────
+  // Exporta o que está sendo exibido na tela (respeita filtro de aba e busca),
+  // com o resumo + o detalhe completo do motor de preço (Atual/Novo/Oferta)
+  // de cada material, igual ao card que abre ao clicar numa linha.
+
+  void _exportarExcel() {
+    final itens = _filtrar(_materiais);
+    if (itens.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nada para exportar com o filtro atual.')),
+      );
+      return;
+    }
+
+    final excel = Excel.createExcel();
+    final nomeAba = excel.getDefaultSheet()!;
+    final sheet = excel[nomeAba];
+
+    String fmtNum(double? v) => v != null ? v.toStringAsFixed(2) : '';
+    String pct(double? v) => v != null ? (v * 100).toStringAsFixed(2) : '';
+
+    final header = [
+      'Código', 'Material', 'Lista', 'Tipo Lista',
+      'Preço Anterior', 'Preço Novo', 'Dif. R\$', 'Dif. %', 'Resultado',
+      // Atual
+      'Atual PPV CX', 'Atual PPV Unit', 'Atual PPC',
+      'Atual MC% Cliente', 'Atual MC R\$', 'Atual MC% Pole',
+      // Novo
+      'Novo PPV CX', 'Novo PPV Unit', 'Novo PPC',
+      'Novo MC% Cliente', 'Novo MC R\$', 'Novo MC% Pole', 'Novo % Reajuste',
+      // Oferta
+      'Oferta % Reajuste', 'Oferta PPV Unit', 'Oferta PPC',
+    ];
+    sheet.appendRow(header.map((h) => TextCellValue(h)).toList());
+
+    for (final item in itens) {
+      final antigo = (item['preco_antigo'] as num).toDouble();
+      final novo = (item['preco_novo'] as num).toDouble();
+      final dif = novo - antigo;
+      final pctDif = antigo > 0 ? (dif / antigo) * 100 : 0.0;
+      final chave = '${item['product_id']}|${item['lista_id']}';
+      final MaterialPreco? m = _previewByKey[chave]?.toMaterialPreco();
+
+      final reajOferta = (m?.ppvUnitOferta != null &&
+              m?.ppvUnitAtual != null &&
+              m!.ppvUnitAtual! > 0)
+          ? (m.ppvUnitOferta! / m.ppvUnitAtual!) - 1
+          : null;
+
+      sheet.appendRow([
+        TextCellValue(item['product_id'].toString()),
+        TextCellValue(item['description'].toString()),
+        TextCellValue(item['lista_nome'].toString()),
+        TextCellValue(
+          item['tipo_lista'] == 'mae' ? 'Lista Mãe' : 'Lista Filha',
+        ),
+        TextCellValue(fmtNum(antigo)),
+        TextCellValue(fmtNum(novo)),
+        TextCellValue(fmtNum(dif)),
+        TextCellValue(pctDif.toStringAsFixed(2)),
+        TextCellValue(_statusLabelItem(item)),
+        TextCellValue(fmtNum(m?.precoAtual)),
+        TextCellValue(fmtNum(m?.ppvUnitAtual)),
+        TextCellValue(fmtNum(m?.ppcAtual)),
+        TextCellValue(pct(m?.margemClienteAtual)),
+        TextCellValue(fmtNum(m?.mcReaisAtual)),
+        TextCellValue(pct(m?.mcPctAtual)),
+        TextCellValue(fmtNum(m?.ppvCxNovo)),
+        TextCellValue(fmtNum(m?.ppvUnitNovo)),
+        TextCellValue(fmtNum(m?.ppcNovoEfetivo)),
+        TextCellValue(pct(m?.margemClienteNovo)),
+        TextCellValue(fmtNum(m?.mcReaisNovo)),
+        TextCellValue(pct(m?.mcPctNovo)),
+        TextCellValue(pct(m?.reajustePct)),
+        TextCellValue(pct(reajOferta)),
+        TextCellValue(fmtNum(m?.ppvUnitOferta)),
+        TextCellValue(fmtNum(m?.ppcOfertaOverride)),
+      ]);
+    }
+
+    final bytes = excel.encode();
+    if (bytes == null) return;
+
+    final blob = html.Blob(
+      [Uint8List.fromList(bytes)],
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    final url = html.Url.createObjectUrlFromBlob(blob);
+    final slug = widget.nomeLista.replaceAll(RegExp(r'[^A-Za-z0-9]+'), '_');
+    html.AnchorElement(href: url)
+      ..setAttribute('download', 'historico_$slug.xlsx')
+      ..click();
+    html.Url.revokeObjectUrl(url);
   }
 
   _KpisSummary _kpis() {
@@ -343,32 +442,33 @@ class _HistoricoDraftDetailScreenState
     final kpis = _kpis();
     final grupos = _gruposOrdenados();
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(32, 20, 32, 0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _KpiRow(kpis: kpis),
-              if (_resumo.isNotEmpty) ...[
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(32, 20, 32, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _KpiRow(kpis: kpis),
+                if (_resumo.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  _RegrasBox(texto: _resumo),
+                ],
                 const SizedBox(height: 12),
-                _RegrasBox(texto: _resumo),
+                _FiltrosBarra(
+                  materiais: _materiais,
+                  filtroTab: _filtroTab,
+                  busca: _busca,
+                  onFiltroTab: (v) => setState(() => _filtroTab = v),
+                  onBusca: (v) => setState(() => _busca = v),
+                  onExportar: _exportarExcel,
+                ),
               ],
-              const SizedBox(height: 12),
-              _FiltrosBarra(
-                materiais: _materiais,
-                filtroTab: _filtroTab,
-                busca: _busca,
-                onFiltroTab: (v) => setState(() => _filtroTab = v),
-                onBusca: (v) => setState(() => _busca = v),
-              ),
-            ],
+            ),
           ),
-        ),
-        Expanded(
-          child: Padding(
+          Padding(
             padding: const EdgeInsets.fromLTRB(32, 12, 32, 24),
             child: _TabelaDetalhe(
               grupos: grupos,
@@ -384,8 +484,8 @@ class _HistoricoDraftDetailScreenState
               }),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -664,6 +764,7 @@ class _FiltrosBarra extends StatelessWidget {
   final String busca;
   final void Function(String) onFiltroTab;
   final void Function(String) onBusca;
+  final VoidCallback onExportar;
 
   const _FiltrosBarra({
     required this.materiais,
@@ -671,6 +772,7 @@ class _FiltrosBarra extends StatelessWidget {
     required this.busca,
     required this.onFiltroTab,
     required this.onBusca,
+    required this.onExportar,
   });
 
   static String _statusLabel(Map<String, dynamic> item) {
@@ -771,6 +873,20 @@ class _FiltrosBarra extends StatelessWidget {
               onChanged: onBusca,
             ),
           ),
+          const SizedBox(width: 10),
+          OutlinedButton.icon(
+            onPressed: onExportar,
+            icon: const Icon(Icons.download_rounded, size: 16, color: _laranja),
+            label: const Text(
+              'Exportar Excel',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _laranja),
+            ),
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: _laranja.withOpacity(0.5)),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
         ],
       ),
     );
@@ -824,8 +940,8 @@ class _TabelaDetalhe extends StatelessWidget {
         border: Border.all(color: _slate200),
       ),
       clipBehavior: Clip.antiAlias,
-      child: ListView(
-        padding: EdgeInsets.zero,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           _cabecalho(),
           ...grupos.map((entry) {

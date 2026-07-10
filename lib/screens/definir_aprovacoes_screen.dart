@@ -597,39 +597,49 @@ class _PainelDetalhes extends StatelessWidget {
           onAprovar: onAprovar,
           onRejeitar: onRejeitar,
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (kpis != null)
-                _KpiCards(kpis: kpis!, countListasFilhas: countListasFilhas),
-              if (detalheCabecalho.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                _RegrasAplicadas(texto: detalheCabecalho),
-              ],
-              const SizedBox(height: 10),
-              _FiltrosEBusca(
-                materiais: materiais,
-                filtroTab: filtroTab,
-                busca: busca,
-                onFiltroTab: onFiltroTab,
-                onBusca: onBusca,
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 8),
         Expanded(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
-            child: _TabelaMateriais(
-              gruposOrdenados: gruposOrdenados,
-              listasExpandidas: listasExpandidas,
-              busca: busca,
-              filtroTab: filtroTab,
-              materiaisFiltrados: materiaisFiltrados,
-              onToggleLista: onToggleLista,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (kpis != null)
+                        _KpiCards(
+                          kpis: kpis!,
+                          countListasFilhas: countListasFilhas,
+                        ),
+                      if (detalheCabecalho.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        _RegrasAplicadas(texto: detalheCabecalho),
+                      ],
+                      const SizedBox(height: 10),
+                      _FiltrosEBusca(
+                        materiais: materiais,
+                        filtroTab: filtroTab,
+                        busca: busca,
+                        onFiltroTab: onFiltroTab,
+                        onBusca: onBusca,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+                  child: _TabelaMateriais(
+                    gruposOrdenados: gruposOrdenados,
+                    listasExpandidas: listasExpandidas,
+                    busca: busca,
+                    filtroTab: filtroTab,
+                    materiaisFiltrados: materiaisFiltrados,
+                    onToggleLista: onToggleLista,
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -1191,7 +1201,8 @@ class _TabelaMateriais extends StatelessWidget {
         border: Border.all(color: Colors.grey.shade200),
       ),
       clipBehavior: Clip.antiAlias,
-      child: ListView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           _tableHeader(),
           ...gruposOrdenados.map((entry) {

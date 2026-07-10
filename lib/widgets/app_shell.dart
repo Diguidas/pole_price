@@ -6,7 +6,6 @@ import 'package:pole_price/controllers/preco_controller.dart';
 import 'package:pole_price/screens/home_screen.dart';
 import 'package:pole_price/screens/material/materials_screen.dart';
 import 'package:pole_price/screens/preco_screen.dart';
-import 'package:pole_price/screens/grupos_screen.dart';
 import 'package:pole_price/screens/definir_aprovacoes_screen.dart';
 import 'package:pole_price/screens/rascunhos_screen.dart';
 import 'package:pole_price/screens/historico_screen.dart';
@@ -31,7 +30,7 @@ enum AppPage {
   String get label => switch (this) {
     AppPage.home => 'Home',
     AppPage.precos => 'Preços',
-    AppPage.grupos => 'Grupos',
+    AppPage.grupos => 'Materiais',
     AppPage.rascunhos => 'Meus Rascunhos',
     AppPage.aprovacoes => 'Aprovações',
     AppPage.historico => 'Histórico',
@@ -43,7 +42,7 @@ enum AppPage {
   IconData get icon => switch (this) {
     AppPage.home => Icons.home_rounded,
     AppPage.precos => Icons.attach_money_rounded,
-    AppPage.grupos => Icons.account_tree_rounded,
+    AppPage.grupos => Icons.inventory_2_rounded,
     AppPage.rascunhos => Icons.folder_outlined,
     AppPage.aprovacoes => Icons.check_circle_rounded,
     AppPage.historico => Icons.history_rounded,
