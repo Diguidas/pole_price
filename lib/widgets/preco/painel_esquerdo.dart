@@ -143,8 +143,20 @@ class _PainelEsquerdoState extends State<PainelEsquerdo> {
       builder: (_) => BuscaMaterialSheet(controller: c),
     );
     if (materiais != null && materiais.isNotEmpty) {
+      final jaExistiam = <String>[];
       for (final m in materiais) {
-        c.adicionarMaterial(m);
+        if (!c.adicionarMaterial(m)) jaExistiam.add(m.codigo);
+      }
+      if (jaExistiam.isNotEmpty && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              jaExistiam.length == 1
+                  ? 'Material ${jaExistiam.first} já está na lista.'
+                  : '${jaExistiam.length} materiais já estavam na lista: ${jaExistiam.join(', ')}',
+            ),
+          ),
+        );
       }
     }
   }

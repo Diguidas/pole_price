@@ -69,55 +69,100 @@ class PrecoController extends ChangeNotifier {
   /// o PPC Novo dele ter sido alterado: se [editado] é pai, recalcula os
   /// filhos diretos; se é filho, recalcula o pai e propaga aos irmãos
   /// (outros filhos do mesmo pai).
+  /// Remove entradas com `codigo` repetido, mantendo a primeira ocorrência.
+  /// Necessário porque a origem dos dados (draft, SAP) pode conter o mesmo
+  /// material mais de uma vez — duplicata faz o vínculo pai/filho mutar uma
+  /// instância diferente da que está sendo exibida na tela.
+  List<MaterialPreco> _dedupPorCodigo(List<MaterialPreco> lista) {
+    final vistos = <String>{};
+    final resultado = <MaterialPreco>[];
+    for (final m in lista) {
+      if (vistos.add(m.codigo)) resultado.add(m);
+    }
+    return resultado;
+  }
+
+  /// Localiza o pai da família de vínculo à qual [m] pertence: o próprio
+  /// [m] se ele não segue ninguém, ou o material que ele segue.
+  MaterialPreco? _localizarPai(MaterialPreco m) {
+    if (m.agrupamentoPreco == null) return null;
+    if (m.materialPaiCode == null) return m;
+    for (final outro in materiais) {
+      if (outro.codigo == m.materialPaiCode &&
+          outro.agrupamentoPreco == m.agrupamentoPreco) {
+        return outro;
+      }
+    }
+    return null;
+  }
+
+  /// Filhos diretos de [pai] dentro do mesmo agrupamento (com % de exceção
+  /// configurado — sem isso não há vínculo de fato).
+  List<MaterialPreco> _filhosDe(MaterialPreco pai) => materiais
+      .where(
+        (m) =>
+            m.codigo != pai.codigo &&
+            m.materialPaiCode == pai.codigo &&
+            m.agrupamentoPreco == pai.agrupamentoPreco &&
+            m.excecaoPrecoPct != null,
+      )
+      .toList();
+
+  /// `true` se [m] participa de um vínculo pai/filho (é filho com exceção
+  /// configurada, ou é pai de algum filho). Materiais fora de um vínculo
+  /// seguem a fórmula normal (PPC ⇄ PPV via margem), sem essa restrição.
+  bool estaVinculado(MaterialPreco m) {
+    final pai = _localizarPai(m);
+    if (pai == null) return false;
+    if (pai.codigo == m.codigo) return _filhosDe(pai).isNotEmpty;
+    return m.excecaoPrecoPct != null;
+  }
+
+  /// Aplica o vínculo de preço (pai/filho) do agrupamento de [editado]:
+  /// o PPC Novo é sempre o MESMO entre pai e filhos (nunca recebe o % de
+  /// exceção); o % de exceção ajusta o PPV Unitário do filho em relação ao
+  /// pai (`filho.ppvUnit = pai.ppvUnit × (1 + excecaoPrecoPct)`).
   void aplicarVinculoAgrupamento(MaterialPreco editado) {
-    if (editado.agrupamentoPreco == null) return;
-    final irmaos = materiais
-        .where(
-          (m) =>
-              m.codigo != editado.codigo &&
-              m.agrupamentoPreco == editado.agrupamentoPreco,
-        )
-        .toList();
-
-    if (editado.materialPaiCode == null) {
-      // editado é pai — atualiza filhos diretos
-      for (final filho in irmaos) {
-        if (filho.materialPaiCode == editado.codigo &&
-            filho.excecaoPrecoPct != null) {
-          filho.ppcNovoOverride =
-              (editado.ppcNovoEfetivo ?? 0) * (1 + filho.excecaoPrecoPct!);
-          _sincronizarNovoPreco(filho);
-          refreshMaterial(filho.codigo);
-        }
-      }
-      return;
-    }
-
-    // editado é filho — recalcula o pai e propaga aos outros filhos dele
-    final pctEditado = editado.excecaoPrecoPct;
-    if (pctEditado == null || pctEditado == -1) return;
-    MaterialPreco? pai;
-    for (final m in irmaos) {
-      if (m.codigo == editado.materialPaiCode) {
-        pai = m;
-        break;
-      }
-    }
+    final pai = _localizarPai(editado);
     if (pai == null) return;
+    final filhos = _filhosDe(pai);
+    if (filhos.isEmpty) return;
 
-    final novoPaiPpc = (editado.ppcNovoEfetivo ?? 0) / (1 + pctEditado);
-    pai.ppcNovoOverride = novoPaiPpc;
-    _sincronizarNovoPreco(pai);
-    refreshMaterial(pai.codigo);
-
-    for (final outro in irmaos) {
-      if (outro.codigo != editado.codigo &&
-          outro.materialPaiCode == pai.codigo &&
-          outro.excecaoPrecoPct != null) {
-        outro.ppcNovoOverride = novoPaiPpc * (1 + outro.excecaoPrecoPct!);
-        _sincronizarNovoPreco(outro);
-        refreshMaterial(outro.codigo);
+    // PPC Novo é compartilhado — copia o valor do material editado para
+    // todos os outros da família (pai + filhos), sem aplicar percentual.
+    final ppcCompartilhado = editado.ppcNovoEfetivo;
+    if (pai.codigo != editado.codigo) pai.ppcNovoOverride = ppcCompartilhado;
+    for (final filho in filhos) {
+      if (filho.codigo != editado.codigo) {
+        filho.ppcNovoOverride = ppcCompartilhado;
       }
+    }
+
+    // Se quem foi editado é um filho e teve o PPV alterado diretamente
+    // (Unit, CX ou Reajuste), o PPV do pai precisa refletir esse valor
+    // "des-ajustado" pela exceção do filho — é o filho quem manda nesse caso.
+    final editadoEhFilhoFonteDoPpv =
+        editado.codigo != pai.codigo && editado.ppvUnitNovoOverride != null;
+    if (editadoEhFilhoFonteDoPpv) {
+      final pct = editado.excecaoPrecoPct;
+      if (pct != null && pct != -1) {
+        pai.ppvUnitNovoOverride = editado.ppvUnitNovoOverride! / (1 + pct);
+      }
+    }
+    _sincronizarNovoPreco(pai);
+    if (pai.codigo != editado.codigo) refreshMaterial(pai.codigo);
+
+    // Recalcula o PPV de cada filho a partir do (possivelmente novo) PPV
+    // do pai — exceto o filho que foi a própria fonte da edição, que já
+    // está com o valor correto.
+    final paiPpv = pai.ppvUnitNovo;
+    for (final filho in filhos) {
+      if (filho.codigo == editado.codigo && editadoEhFilhoFonteDoPpv) continue;
+      if (paiPpv != null) {
+        filho.ppvUnitNovoOverride = paiPpv * (1 + filho.excecaoPrecoPct!);
+      }
+      _sincronizarNovoPreco(filho);
+      refreshMaterial(filho.codigo);
     }
   }
 
@@ -278,7 +323,7 @@ class PrecoController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      materiais = await service.getMaterials(selecionada!.id);
+      materiais = _dedupPorCodigo(await service.getMaterials(selecionada!.id));
       filtrados = List.from(materiais);
     } catch (e) {
       erro = 'Erro ao carregar materiais: $e';
@@ -342,6 +387,8 @@ class PrecoController extends ChangeNotifier {
           loevmOp: loevmP.op,
         );
       }
+
+      materiais = _dedupPorCodigo(materiais);
 
       if (materiais.isNotEmpty) {
         // Enriquece com clusterId da tabela products
@@ -434,10 +481,24 @@ class PrecoController extends ChangeNotifier {
   }
 
   /// Adiciona um material buscado manualmente (origem = manual).
-  void adicionarMaterial(MaterialPreco m) {
+  /// Se o código já está na lista mas foi removido (`removerMaterial` só
+  /// marca `removido = true`, não tira de `materiais`), apenas o restaura.
+  /// Se já está ativo, ignora e retorna `false` — evita duplicar a mesma
+  /// MaterialPreco (bug: vínculo pai/filho editava uma cópia enquanto a
+  /// tela renderizava a outra, parecendo travado).
+  bool adicionarMaterial(MaterialPreco m) {
+    final existente = materiais.where((e) => e.codigo == m.codigo).firstOrNull;
+    if (existente != null) {
+      if (!existente.removido) return false;
+      existente.removido = false;
+      filtrados = materiais.where((mat) => !mat.removido).toList();
+      notifyListeners();
+      return true;
+    }
     materiais.add(m);
     filtrados = materiais.where((m) => !m.removido).toList();
     notifyListeners();
+    return true;
   }
 
   void atualizarPreco(MaterialPreco m, double novo, {bool promover = false}) {
@@ -765,7 +826,10 @@ class PrecoController extends ChangeNotifier {
         );
       }).toList();
 
-      // Após: materiais = itens.map(...).toList();
+      // Defesa contra linhas duplicadas em price_draft_items para o mesmo
+      // product_id (ex: item salvo duas vezes no mesmo draft) — sem isso,
+      // o vínculo pai/filho pode editar uma cópia e a tela renderizar a outra.
+      materiais = _dedupPorCodigo(materiais);
 
       try {
         final codigos = materiais.map((m) => m.codigo).toList();

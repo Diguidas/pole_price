@@ -575,9 +575,8 @@ class _ItemMaterialState extends State<_ItemMaterial> {
       _ppcNovoCtrl.text = m.ppcNovoOverride != null
           ? m.ppcNovoOverride!.toStringAsFixed(2)
           : '';
-      _ppvUnitNovoCtrl.text = m.ppvUnitNovoOverride != null
-          ? m.ppvUnitNovoOverride!.toStringAsFixed(2)
-          : '';
+      final ppvUnit = m.ppvUnitNovo;
+      _ppvUnitNovoCtrl.text = ppvUnit != null ? ppvUnit.toStringAsFixed(2) : '';
       final ppvCx = m.ppvCxNovo;
       _ppvCxNovoCtrl.text = ppvCx != null ? ppvCx.toStringAsFixed(2) : '';
       final reaj = m.reajustePct;
@@ -612,12 +611,12 @@ class _ItemMaterialState extends State<_ItemMaterial> {
     m.ppcNovoOverride = val;
     m.ppvUnitNovoOverride = null;
     m.reajusteOverride = null;
+    widget.controller.aplicarVinculoAgrupamento(m);
     final ppvNovo = m.ppvUnitNovo;
     _ppvUnitNovoCtrl.text = ppvNovo != null ? ppvNovo.toStringAsFixed(2) : '';
     _sincronizarPpvCxNovoCtrl();
     final ppvCx = m.ppvCxNovo;
     if (ppvCx != null) m.novoPreco = ppvCx;
-    widget.controller.aplicarVinculoAgrupamento(m);
     setState(() {});
     widget.onChanged();
   }
@@ -634,12 +633,19 @@ class _ItemMaterialState extends State<_ItemMaterial> {
   void _onPpvUnitNovoChanged(String v) {
     final val = double.tryParse(v.replaceAll(',', '.'));
     m.ppvUnitNovoOverride = val;
-    if (val != null) {
+    // Material vinculado (pai/filho com % de exceção): o PPC é sempre
+    // compartilhado, não é recalculado a partir do PPV — quem cuida disso
+    // é aplicarVinculoAgrupamento.
+    if (val != null && !widget.controller.estaVinculado(m)) {
       final ppcCalculado = m.ppcDePpvUnit(val);
       m.ppcNovoOverride = ppcCalculado;
       if (ppcCalculado != null)
         _ppcNovoCtrl.text = ppcCalculado.toStringAsFixed(2);
     }
+    widget.controller.aplicarVinculoAgrupamento(m);
+    _ppcNovoCtrl.text = m.ppcNovoOverride != null
+        ? m.ppcNovoOverride!.toStringAsFixed(2)
+        : _ppcNovoCtrl.text;
     _sincronizarPpvCxNovoCtrl();
     final ppvCx = m.ppvCxNovo;
     if (ppvCx != null) m.novoPreco = ppvCx;
@@ -655,13 +661,17 @@ class _ItemMaterialState extends State<_ItemMaterial> {
         : null;
     m.ppvUnitNovoOverride = ppvUnit;
     _ppvUnitNovoCtrl.text = ppvUnit != null ? ppvUnit.toStringAsFixed(2) : '';
-    if (ppvUnit != null) {
+    if (ppvUnit != null && !widget.controller.estaVinculado(m)) {
       final ppcCalculado = m.ppcDePpvUnit(ppvUnit);
       m.ppcNovoOverride = ppcCalculado;
       if (ppcCalculado != null) {
         _ppcNovoCtrl.text = ppcCalculado.toStringAsFixed(2);
       }
     }
+    widget.controller.aplicarVinculoAgrupamento(m);
+    _ppcNovoCtrl.text = m.ppcNovoOverride != null
+        ? m.ppcNovoOverride!.toStringAsFixed(2)
+        : _ppcNovoCtrl.text;
     final ppvCx = m.ppvCxNovo;
     if (ppvCx != null) m.novoPreco = ppvCx;
     setState(() {});
@@ -671,16 +681,23 @@ class _ItemMaterialState extends State<_ItemMaterial> {
   void _onReajusteChanged(String v) {
     final val = double.tryParse(v.replaceAll(',', '.'));
     m.reajusteOverride = val != null ? val / 100 : null;
+    final vinculado = widget.controller.estaVinculado(m);
     if (val != null) {
       final ppvNovo = m.ppvUnitDeReajuste(val / 100);
       m.ppvUnitNovoOverride = ppvNovo;
       if (ppvNovo != null) {
         _ppvUnitNovoCtrl.text = ppvNovo.toStringAsFixed(2);
-        final ppcCalc = m.ppcDePpvUnit(ppvNovo);
-        m.ppcNovoOverride = ppcCalc;
-        if (ppcCalc != null) _ppcNovoCtrl.text = ppcCalc.toStringAsFixed(2);
+        if (!vinculado) {
+          final ppcCalc = m.ppcDePpvUnit(ppvNovo);
+          m.ppcNovoOverride = ppcCalc;
+          if (ppcCalc != null) _ppcNovoCtrl.text = ppcCalc.toStringAsFixed(2);
+        }
       }
     }
+    widget.controller.aplicarVinculoAgrupamento(m);
+    _ppcNovoCtrl.text = m.ppcNovoOverride != null
+        ? m.ppcNovoOverride!.toStringAsFixed(2)
+        : _ppcNovoCtrl.text;
     _sincronizarPpvCxNovoCtrl();
     final ppvCx = m.ppvCxNovo;
     if (ppvCx != null) m.novoPreco = ppvCx;
