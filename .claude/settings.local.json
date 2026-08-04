@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(flutter analyze *)"
+      "Bash(flutter analyze *)",
+      "Bash(find \"/c/Users/guilh/OneDrive/Documentos/Pole Alimentos - Projetos\" -iname \"*push-sap*\" -o -iname \"*sap-prices*\" 2>/dev/null)"
     ]
   }
 }

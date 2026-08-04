@@ -1,7 +1,8 @@
 {
   "projects": {
     "default": "pole-price-c54ef",
-    "pole-price": "pole-price"
+    "pole-price": "pole-price",
+    "pole": "pole-price"
   },
   "targets": {},
   "etags": {}

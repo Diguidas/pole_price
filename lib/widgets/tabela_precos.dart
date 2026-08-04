@@ -1025,8 +1025,8 @@ class _ItemMaterialState extends State<_ItemMaterial> {
           _ColInput(
             label: '% Reajuste',
             controller: _reajusteCtrl,
-            hint: reaj != null ? '${(reaj * 100).toStringAsFixed(2)}' : '0,00',
-            suffix: '%',
+            hint: reaj != null ? '${(reaj * 100).toStringAsFixed(1)}' : '0,0',
+            flex: 2,
             onChanged: _onReajusteChanged,
             onSubmitted: _onReajusteChanged,
             color: reaj != null
@@ -1060,9 +1060,8 @@ class _ItemMaterialState extends State<_ItemMaterial> {
             label: '% Reajuste',
             controller: _reajusteOfertaCtrl,
             hint: reajOferta != null
-                ? (reajOferta * 100).toStringAsFixed(2)
-                : '0,00',
-            suffix: '%',
+                ? (reajOferta * 100).toStringAsFixed(1)
+                : '0,0',
             onChanged: _onReajusteOfertaChanged,
             onSubmitted: _onReajusteOfertaChanged,
             color: reajOferta != null
@@ -1388,7 +1387,7 @@ class _ColInput extends StatelessWidget {
                 ),
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 6,
+                  horizontal: 4,
                   vertical: 7,
                 ),
                 filled: true,

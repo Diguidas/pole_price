@@ -485,6 +485,10 @@ class DraftPricingService {
         if (melhor != null) kbetr = _aplicarRegra(melhor, kbetr);
       }
 
+      // Evita ruído de ponto flutuante (ex.: 140.06000000000001) antes de
+      // enviar ao SAP.
+      kbetr = double.parse(kbetr.toStringAsFixed(2));
+
       return {
         'MATNR': matnr,
         'KBETR': kbetr,

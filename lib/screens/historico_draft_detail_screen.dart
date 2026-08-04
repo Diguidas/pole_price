@@ -60,6 +60,10 @@ class _HistoricoDraftDetailScreenState
   String _filtroTab = 'todos';
   String _busca = '';
   final Set<String> _listasExpandidas = {};
+  // Cache de agrupar+ordenar por lista — só depende de _materiais, não de
+  // _listasExpandidas/_filtroTab/_busca. Sem isso, cada clique de
+  // expandir/recolher reagrupava e reordenava tudo de novo.
+  List<MapEntry<String, List<Map<String, dynamic>>>>? _gruposCache;
 
   @override
   void initState() {
@@ -81,8 +85,15 @@ class _HistoricoDraftDetailScreenState
           for (final m in preview.materiais) '${m.productId}|${m.listaId}': m,
         };
         _resumo = preview.resumo;
-        for (final m in _materiais) {
-          _listasExpandidas.add(m['lista_id'] as String);
+        _gruposCache = null;
+        // Só a lista mãe abre expandida por padrão — expandir todas de
+        // uma vez com listas grandes deixava o carregamento e os toggles
+        // muito lentos (a tabela não é virtualizada).
+        for (final m in preview.materiais) {
+          if (m.tipoLista == 'mae') {
+            _listasExpandidas.add(m.listaId);
+            break;
+          }
         }
       });
     } catch (e) {
@@ -116,7 +127,7 @@ class _HistoricoDraftDetailScreenState
   }
 
   List<MapEntry<String, List<Map<String, dynamic>>>> _gruposOrdenados() {
-    return _agruparPorLista().entries.toList()..sort((a, b) {
+    return _gruposCache ??= _agruparPorLista().entries.toList()..sort((a, b) {
       final aMae = a.value.first['tipo_lista'] == 'mae';
       final bMae = b.value.first['tipo_lista'] == 'mae';
       if (aMae && !bMae) return -1;
@@ -441,13 +452,13 @@ class _HistoricoDraftDetailScreenState
   Widget _corpo() {
     final kpis = _kpis();
     final grupos = _gruposOrdenados();
+    final linhas = _montarLinhas(grupos);
 
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(32, 20, 32, 0),
+    return CustomScrollView(
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(32, 20, 32, 0),
+          sliver: SliverToBoxAdapter(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -465,28 +476,116 @@ class _HistoricoDraftDetailScreenState
                   onBusca: (v) => setState(() => _busca = v),
                   onExportar: _exportarExcel,
                 ),
+                const SizedBox(height: 12),
+                if (linhas.isEmpty)
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: _slate200),
+                    ),
+                    child: const Center(
+                      heightFactor: 4,
+                      child: Text(
+                        'Nenhum material encontrado no rascunho.',
+                        style: TextStyle(
+                          color: _slate600,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  _TabelaCabecalho(),
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(32, 12, 32, 24),
-            child: _TabelaDetalhe(
-              grupos: grupos,
-              listasExpandidas: _listasExpandidas,
-              filtrar: _filtrar,
-              busca: _busca,
-              filtroTab: _filtroTab,
-              previewByKey: _previewByKey,
-              onToggle: (k) => setState(() {
-                _listasExpandidas.contains(k)
-                    ? _listasExpandidas.remove(k)
-                    : _listasExpandidas.add(k);
-              }),
+        ),
+        if (linhas.isNotEmpty)
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(32, 0, 32, 24),
+            // Virtualizado: só constrói as linhas realmente visíveis na
+            // tela (grupos fechados nem entram em `linhas`). É isso que
+            // resolve a lentidão de carregamento/scroll com listas grandes.
+            sliver: SliverList.builder(
+              itemCount: linhas.length,
+              itemBuilder: (context, index) {
+                final linha = linhas[index];
+                return switch (linha) {
+                  _HeaderLinha() => _GrupoHeader(
+                    tipoLista: linha.tipoLista,
+                    nomeLista: linha.nomeLista,
+                    alterados: linha.alterados,
+                    total: linha.total,
+                    onToggle: () => setState(() {
+                      _listasExpandidas.contains(linha.chave)
+                          ? _listasExpandidas.remove(linha.chave)
+                          : _listasExpandidas.add(linha.chave);
+                    }),
+                    expandido: _listasExpandidas.contains(linha.chave),
+                  ),
+                  _VaziaLinha() => const Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Text(
+                      'Nenhum material correspondente nesta ramificação.',
+                      style: TextStyle(
+                        color: _slate600,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  _ItemLinha() => _LinhaItem(
+                    item: linha.item,
+                    preview:
+                        _previewByKey['${linha.item['product_id']}|${linha.item['lista_id']}'],
+                  ),
+                };
+              },
             ),
           ),
-        ],
-      ),
+      ],
     );
+  }
+
+  /// Achata grupos (lista mãe/filhas) + itens em uma lista única, incluindo
+  /// só as linhas de grupos expandidos — o que fica de fora não é
+  /// construído pelo SliverList.
+  List<_Linha> _montarLinhas(
+    List<MapEntry<String, List<Map<String, dynamic>>>> grupos,
+  ) {
+    final linhas = <_Linha>[];
+    for (final entry in grupos) {
+      final chave = entry.key;
+      final grupo = entry.value;
+      final filtrados = _filtrar(grupo);
+      if (filtrados.isEmpty && _busca.isNotEmpty) continue;
+      if (filtrados.isEmpty &&
+          _filtroTab != 'todos' &&
+          _filtroTab != 'sem_alteracao') {
+        continue;
+      }
+      final meta = grupo.first;
+      linhas.add(
+        _HeaderLinha(
+          chave: chave,
+          tipoLista: meta['tipo_lista'] as String,
+          nomeLista: meta['lista_nome'] as String,
+          alterados: grupo.where((m) => m['foi_editado'] == true).length,
+          total: grupo.length,
+        ),
+      );
+      if (_listasExpandidas.contains(chave)) {
+        if (filtrados.isEmpty) {
+          linhas.add(_VaziaLinha());
+        } else {
+          for (final item in filtrados) {
+            linhas.add(_ItemLinha(item: item));
+          }
+        }
+      }
+    }
+    return linhas;
   }
 
   Widget _erroWidget() {
@@ -893,86 +992,49 @@ class _FiltrosBarra extends StatelessWidget {
   }
 }
 
-class _TabelaDetalhe extends StatelessWidget {
+/// Uma linha "achatada" da tabela: cabeçalho de grupo, item ou aviso de
+/// grupo vazio. Permite montar a tabela toda como uma lista única e
+/// virtualizá-la com SliverList.builder.
+sealed class _Linha {}
+
+class _HeaderLinha extends _Linha {
+  final String chave;
+  final String tipoLista;
+  final String nomeLista;
+  final int alterados;
+  final int total;
+  _HeaderLinha({
+    required this.chave,
+    required this.tipoLista,
+    required this.nomeLista,
+    required this.alterados,
+    required this.total,
+  });
+}
+
+class _VaziaLinha extends _Linha {}
+
+class _ItemLinha extends _Linha {
+  final Map<String, dynamic> item;
+  _ItemLinha({required this.item});
+}
+
+class _TabelaCabecalho extends StatelessWidget {
   static const _slate200 = Color(0xFFE2E8F0);
   static const _bgSuave = Color(0xFFF8FAFC);
   static const _slate600 = Color(0xFF475569);
-  final List<MapEntry<String, List<Map<String, dynamic>>>> grupos;
-  final Set<String> listasExpandidas;
-  final List<Map<String, dynamic>> Function(List<Map<String, dynamic>>) filtrar;
-  final String busca;
-  final String filtroTab;
-  final Map<String, MaterialDraftPreview> previewByKey;
-  final void Function(String) onToggle;
 
-  const _TabelaDetalhe({
-    required this.grupos,
-    required this.listasExpandidas,
-    required this.filtrar,
-    required this.busca,
-    required this.filtroTab,
-    required this.previewByKey,
-    required this.onToggle,
-  });
+  const _TabelaCabecalho();
 
   @override
   Widget build(BuildContext context) {
-    if (grupos.isEmpty) {
-      return Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: _slate200),
-        ),
-        child: const Center(
-          child: Text(
-            'Nenhum material encontrado no rascunho.',
-            style: TextStyle(color: _slate600, fontWeight: FontWeight.w500),
-          ),
-        ),
-      );
-    }
-
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        color: _bgSuave,
         border: Border.all(color: _slate200),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
       ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _cabecalho(),
-          ...grupos.map((entry) {
-            final chave = entry.key;
-            final grupo = entry.value;
-            final filtrados = filtrar(grupo);
-            if (filtrados.isEmpty && busca.isNotEmpty)
-              return const SizedBox.shrink();
-            if (filtrados.isEmpty &&
-                filtroTab != 'todos' &&
-                filtroTab != 'sem_alteracao') {
-              return const SizedBox.shrink();
-            }
-            return _GrupoExpansivel(
-              chave: chave,
-              grupo: grupo,
-              filtrados: filtrados,
-              expandido: listasExpandidas.contains(chave),
-              previewByKey: previewByKey,
-              onToggle: () => onToggle(chave),
-            );
-          }),
-        ],
-      ),
-    );
-  }
-
-  static Widget _cabecalho() {
-    return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-      color: _bgSuave,
       child: Row(
         children: [
           _th('Código', flex: 2),
@@ -1009,131 +1071,103 @@ class _TabelaDetalhe extends StatelessWidget {
   }
 }
 
-class _GrupoExpansivel extends StatelessWidget {
+class _GrupoHeader extends StatelessWidget {
   static const _laranja = Color(0xFFFF6B00);
   static const _slate900 = Color(0xFF0F172A);
   static const _slate600 = Color(0xFF475569);
   static const _slate200 = Color(0xFFE2E8F0);
   static const _slate100 = Color(0xFFF1F5F9);
-  final String chave;
-  final List<Map<String, dynamic>> grupo;
-  final List<Map<String, dynamic>> filtrados;
+  final String tipoLista;
+  final String nomeLista;
+  final int alterados;
+  final int total;
   final bool expandido;
-  final Map<String, MaterialDraftPreview> previewByKey;
   final VoidCallback onToggle;
 
-  const _GrupoExpansivel({
-    required this.chave,
-    required this.grupo,
-    required this.filtrados,
+  const _GrupoHeader({
+    required this.tipoLista,
+    required this.nomeLista,
+    required this.alterados,
+    required this.total,
     required this.expandido,
-    required this.previewByKey,
     required this.onToggle,
   });
 
   @override
   Widget build(BuildContext context) {
-    final meta = grupo.first;
-    final tipoLista = meta['tipo_lista'] as String;
-    final nomeLista = meta['lista_nome'] as String;
-    final alterados = grupo.where((m) => m['foi_editado'] == true).length;
     final cor = tipoLista == 'mae' ? _laranja : Colors.blue.shade700;
 
-    return Column(
-      children: [
-        Material(
-          color: expandido ? cor.withOpacity(0.04) : _slate100.withOpacity(0.4),
-          child: InkWell(
-            onTap: onToggle,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              child: Row(
-                children: [
-                  Icon(
-                    expandido
-                        ? Icons.keyboard_arrow_down_rounded
-                        : Icons.keyboard_arrow_right_rounded,
-                    size: 20,
-                    color: cor,
-                  ),
-                  const SizedBox(width: 8),
-                  Icon(
-                    tipoLista == 'mae'
-                        ? Icons.table_chart_outlined
-                        : Icons.account_tree_outlined,
-                    size: 16,
-                    color: cor,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    tipoLista == 'mae' ? 'Lista Mãe' : 'Lista Filha',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      color: cor,
-                      letterSpacing: 0.3,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      nomeLista,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                        color: _slate900,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: _slate200),
-                    ),
-                    child: Text(
-                      '$alterados/${grupo.length} alterados',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: _slate600,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+    return Material(
+      color: expandido ? cor.withOpacity(0.04) : _slate100.withOpacity(0.4),
+      child: InkWell(
+        onTap: onToggle,
+        child: Container(
+          decoration: const BoxDecoration(
+            border: Border(bottom: BorderSide(color: _slate100)),
           ),
-        ),
-        if (expandido) ...[
-          if (filtrados.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(24),
-              child: Text(
-                'Nenhum material correspondente nesta ramificação.',
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          child: Row(
+            children: [
+              Icon(
+                expandido
+                    ? Icons.keyboard_arrow_down_rounded
+                    : Icons.keyboard_arrow_right_rounded,
+                size: 20,
+                color: cor,
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                tipoLista == 'mae'
+                    ? Icons.table_chart_outlined
+                    : Icons.account_tree_outlined,
+                size: 16,
+                color: cor,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                tipoLista == 'mae' ? 'Lista Mãe' : 'Lista Filha',
                 style: TextStyle(
-                  color: _slate600,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: cor,
+                  letterSpacing: 0.3,
                 ),
               ),
-            )
-          else
-            ...filtrados.map(
-              (item) => _LinhaItem(
-                item: item,
-                preview:
-                    previewByKey['${item['product_id']}|${item['lista_id']}'],
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  nomeLista,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                    color: _slate900,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-            ),
-        ],
-        const Divider(height: 1, color: _slate100),
-      ],
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: _slate200),
+                ),
+                child: Text(
+                  '$alterados/$total alterados',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: _slate600,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

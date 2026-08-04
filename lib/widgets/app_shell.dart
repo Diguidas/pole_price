@@ -209,6 +209,11 @@ class _AppShellState extends State<AppShell> {
     ctrl.datbi = params.datbi;
     ctrl.databOp = params.databOp;
     ctrl.datbiOp = params.datbiOp;
+    // Por padrão, uma consulta nova já entra excluindo materiais
+    // inativos e bloqueados ('E' = excluir; usuário ajusta manualmente
+    // na tela se precisar incluir).
+    ctrl.kznepFilter = 'E';
+    ctrl.loevmFilter = 'E';
 
     // ← ISSO resolve o botão esmaecido e o seletor vazio
     ctrl.selecionada = ctrl.listas
