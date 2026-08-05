@@ -645,7 +645,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
     widget.controller.aplicarVinculoAgrupamento(m);
     _ppcNovoCtrl.text = m.ppcNovoOverride != null
         ? m.ppcNovoOverride!.toStringAsFixed(2)
-        : _ppcNovoCtrl.text;
+        : '';
     _sincronizarPpvCxNovoCtrl();
     final ppvCx = m.ppvCxNovo;
     if (ppvCx != null) m.novoPreco = ppvCx;
@@ -671,7 +671,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
     widget.controller.aplicarVinculoAgrupamento(m);
     _ppcNovoCtrl.text = m.ppcNovoOverride != null
         ? m.ppcNovoOverride!.toStringAsFixed(2)
-        : _ppcNovoCtrl.text;
+        : '';
     final ppvCx = m.ppvCxNovo;
     if (ppvCx != null) m.novoPreco = ppvCx;
     setState(() {});
@@ -697,7 +697,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
     widget.controller.aplicarVinculoAgrupamento(m);
     _ppcNovoCtrl.text = m.ppcNovoOverride != null
         ? m.ppcNovoOverride!.toStringAsFixed(2)
-        : _ppcNovoCtrl.text;
+        : '';
     _sincronizarPpvCxNovoCtrl();
     final ppvCx = m.ppvCxNovo;
     if (ppvCx != null) m.novoPreco = ppvCx;
