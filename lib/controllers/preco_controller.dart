@@ -84,12 +84,16 @@ class PrecoController extends ChangeNotifier {
 
   /// Localiza o pai da família de vínculo à qual [m] pertence: o próprio
   /// [m] se ele não segue ninguém, ou o material que ele segue.
+  /// Busca o pai só pelo código — não exige que o cadastro do PAI também
+  /// tenha `agrupamento_preco` preenchido, já que esse dado normalmente só
+  /// é cadastrado no FILHO (materialPaiCode + agrupamentoPreco). Exigir os
+  /// dois lados preenchidos fazia o vínculo silenciosamente não encontrar
+  /// o pai sempre que o cadastro dele não tivesse o agrupamento setado.
   MaterialPreco? _localizarPai(MaterialPreco m) {
     if (m.agrupamentoPreco == null) return null;
     if (m.materialPaiCode == null) return m;
     for (final outro in materiais) {
-      if (outro.codigo == m.materialPaiCode &&
-          outro.agrupamentoPreco == m.agrupamentoPreco) {
+      if (outro.codigo == m.materialPaiCode) {
         return outro;
       }
     }
@@ -97,13 +101,14 @@ class PrecoController extends ChangeNotifier {
   }
 
   /// Filhos diretos de [pai] dentro do mesmo agrupamento (com % de exceção
-  /// configurado — sem isso não há vínculo de fato).
+  /// configurado — sem isso não há vínculo de fato). Basta o filho apontar
+  /// para o código do pai — não exige que o cadastro do pai também tenha
+  /// `agrupamento_preco` preenchido (ver nota em `_localizarPai`).
   List<MaterialPreco> _filhosDe(MaterialPreco pai) => materiais
       .where(
         (m) =>
             m.codigo != pai.codigo &&
             m.materialPaiCode == pai.codigo &&
-            m.agrupamentoPreco == pai.agrupamentoPreco &&
             m.excecaoPrecoPct != null,
       )
       .toList();
@@ -122,44 +127,81 @@ class PrecoController extends ChangeNotifier {
   /// o PPC Novo é sempre o MESMO entre pai e filhos (nunca recebe o % de
   /// exceção); o % de exceção ajusta o PPV Unitário do filho em relação ao
   /// pai (`filho.ppvUnit = pai.ppvUnit × (1 + excecaoPrecoPct)`).
-  void aplicarVinculoAgrupamento(MaterialPreco editado) {
+  ///
+  /// [ppcMudou] deve ser `true` apenas quando foi o campo PPC Novo de
+  /// [editado] que motivou esta chamada (mesmo que o usuário tenha limpado
+  /// o campo, deixando-o null) — só aí faz sentido propagar (inclusive
+  /// propagar um "limpou") o PPC para o resto da família. Quando quem
+  /// mudou foi PPV Unit/PPV CX/Reajuste, [ppcMudou] deve ficar `false`
+  /// para não mexer no PPC que já estava certo no pai e nos irmãos.
+  void aplicarVinculoAgrupamento(MaterialPreco editado, {bool ppcMudou = false}) {
     final pai = _localizarPai(editado);
     if (pai == null) return;
     final filhos = _filhosDe(pai);
     if (filhos.isEmpty) return;
 
-    // PPC Novo é compartilhado — copia o valor do material editado para
-    // todos os outros da família (pai + filhos), sem aplicar percentual.
-    final ppcCompartilhado = editado.ppcNovoEfetivo;
-    if (pai.codigo != editado.codigo) pai.ppcNovoOverride = ppcCompartilhado;
-    for (final filho in filhos) {
-      if (filho.codigo != editado.codigo) {
-        filho.ppcNovoOverride = ppcCompartilhado;
+    if (ppcMudou) {
+      final ppcCompartilhado = editado.ppcNovoEfetivo;
+      if (pai.codigo != editado.codigo) pai.ppcNovoOverride = ppcCompartilhado;
+      for (final filho in filhos) {
+        if (filho.codigo != editado.codigo) {
+          filho.ppcNovoOverride = ppcCompartilhado;
+        }
       }
     }
 
-    // Se quem foi editado é um filho e teve o PPV alterado diretamente
-    // (Unit, CX ou Reajuste), o PPV do pai precisa refletir esse valor
-    // "des-ajustado" pela exceção do filho — é o filho quem manda nesse caso.
-    final editadoEhFilhoFonteDoPpv =
-        editado.codigo != pai.codigo && editado.ppvUnitNovoOverride != null;
-    if (editadoEhFilhoFonteDoPpv) {
-      final pct = editado.excecaoPrecoPct;
-      if (pct != null && pct != -1) {
-        pai.ppvUnitNovoOverride = editado.ppvUnitNovoOverride! / (1 + pct);
+    final filhoEhFontePpv =
+        editado.codigo != pai.codigo &&
+        editado.ppvUnitNovoOverride != null &&
+        !editado.ppvUnitNovoLimpo;
+    // NOVO: filho limpou o próprio PPV diretamente -> o pai (se derivado
+    // dele) também precisa voltar a null, não só ficar sem atualizar.
+    final filhoLimpouPpv =
+        editado.codigo != pai.codigo && editado.ppvUnitNovoLimpo;
+
+    if (!pai.ppvUnitNovoLimpo) {
+      if (filhoEhFontePpv) {
+        final pct = editado.excecaoPrecoPct;
+        if (pct != null && pct != -1) {
+          pai.ppvUnitNovoOverride = editado.ppvUnitNovoOverride! / (1 + pct);
+          // O pai está recebendo um valor novo e válido — sem isso, se o
+          // flag de limpeza dele tivesse ficado true em algum momento
+          // anterior, o getter `ppvUnitNovo` ignoraria este override e
+          // continuaria retornando null (o flag tem prioridade sobre o
+          // override), travando o vínculo mesmo com dado novo gravado.
+          pai.ppvUnitNovoLimpo = false;
+        }
+      } else if (filhoLimpouPpv) {
+        pai.ppvUnitNovoOverride = null;
       }
     }
     _sincronizarNovoPreco(pai);
     if (pai.codigo != editado.codigo) refreshMaterial(pai.codigo);
 
-    // Recalcula o PPV de cada filho a partir do (possivelmente novo) PPV
-    // do pai — exceto o filho que foi a própria fonte da edição, que já
-    // está com o valor correto.
     final paiPpv = pai.ppvUnitNovo;
     for (final filho in filhos) {
-      if (filho.codigo == editado.codigo && editadoEhFilhoFonteDoPpv) continue;
-      if (paiPpv != null) {
-        filho.ppvUnitNovoOverride = paiPpv * (1 + filho.excecaoPrecoPct!);
+      if (filho.codigo == editado.codigo) {
+        if (!filhoEhFontePpv && !filho.ppvUnitNovoLimpo) {
+          filho.ppvUnitNovoOverride = paiPpv != null
+              ? paiPpv * (1 + filho.excecaoPrecoPct!)
+              : null;
+          if (filho.ppvUnitNovoOverride != null) {
+            filho.ppvUnitNovoLimpo = false;
+          }
+          _sincronizarNovoPreco(filho);
+        }
+        continue;
+      }
+      if (filho.ppvUnitNovoLimpo) {
+        _sincronizarNovoPreco(filho);
+        refreshMaterial(filho.codigo);
+        continue;
+      }
+      filho.ppvUnitNovoOverride = paiPpv != null
+          ? paiPpv * (1 + filho.excecaoPrecoPct!)
+          : null;
+      if (filho.ppvUnitNovoOverride != null) {
+        filho.ppvUnitNovoLimpo = false;
       }
       _sincronizarNovoPreco(filho);
       refreshMaterial(filho.codigo);
@@ -574,7 +616,9 @@ class PrecoController extends ChangeNotifier {
   /// demais listas da mesma política (regra mãe/filha). Se a lista mãe não
   /// pertence a nenhuma política, `politicaAtual` fica null e `targets`
   /// permanece inalterado (seleção manual, comportamento de hoje).
-  Future<void> sincronizarPoliticaDaListaMae({bool preencherTargets = true}) async {
+  Future<void> sincronizarPoliticaDaListaMae({
+    bool preencherTargets = true,
+  }) async {
     politicaAtual = null;
     if (pltyp == null) {
       notifyListeners();

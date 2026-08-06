@@ -132,7 +132,8 @@ class _TabelaPrecosState extends State<TabelaPrecos> {
 
     final lista = _listaExibida;
     final todasSelecionadas =
-        lista.isNotEmpty && lista.every((m) => _selecionados.contains(m.codigo));
+        lista.isNotEmpty &&
+        lista.every((m) => _selecionados.contains(m.codigo));
 
     return Column(
       children: [
@@ -580,9 +581,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
       final ppvCx = m.ppvCxNovo;
       _ppvCxNovoCtrl.text = ppvCx != null ? ppvCx.toStringAsFixed(2) : '';
       final reaj = m.reajustePct;
-      _reajusteCtrl.text = reaj != null
-          ? (reaj * 100).toStringAsFixed(2)
-          : '';
+      _reajusteCtrl.text = reaj != null ? (reaj * 100).toStringAsFixed(2) : '';
     });
   }
 
@@ -610,8 +609,9 @@ class _ItemMaterialState extends State<_ItemMaterial> {
     final val = double.tryParse(v.replaceAll(',', '.'));
     m.ppcNovoOverride = val;
     m.ppvUnitNovoOverride = null;
+     m.ppvUnitNovoLimpo = false;
     m.reajusteOverride = null;
-    widget.controller.aplicarVinculoAgrupamento(m);
+    widget.controller.aplicarVinculoAgrupamento(m, ppcMudou: true);
     final ppvNovo = m.ppvUnitNovo;
     _ppvUnitNovoCtrl.text = ppvNovo != null ? ppvNovo.toStringAsFixed(2) : '';
     _sincronizarPpvCxNovoCtrl();
@@ -633,6 +633,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
   void _onPpvUnitNovoChanged(String v) {
     final val = double.tryParse(v.replaceAll(',', '.'));
     m.ppvUnitNovoOverride = val;
+    m.ppvUnitNovoLimpo = val == null;
     // Material vinculado (pai/filho com % de exceção): o PPC é sempre
     // compartilhado, não é recalculado a partir do PPV — quem cuida disso
     // é aplicarVinculoAgrupamento.
@@ -660,7 +661,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
         ? val / fator
         : null;
     m.ppvUnitNovoOverride = ppvUnit;
-    _ppvUnitNovoCtrl.text = ppvUnit != null ? ppvUnit.toStringAsFixed(2) : '';
+    m.ppvUnitNovoLimpo = val == null;
     if (ppvUnit != null && !widget.controller.estaVinculado(m)) {
       final ppcCalculado = m.ppcDePpvUnit(ppvUnit);
       m.ppcNovoOverride = ppcCalculado;
@@ -671,6 +672,11 @@ class _ItemMaterialState extends State<_ItemMaterial> {
     widget.controller.aplicarVinculoAgrupamento(m);
     _ppcNovoCtrl.text = m.ppcNovoOverride != null
         ? m.ppcNovoOverride!.toStringAsFixed(2)
+        : '';
+    // usa o valor EFETIVO (override ou fallback da fórmula), não o bruto digitado
+    final ppvUnitEfetivo = m.ppvUnitNovo;
+    _ppvUnitNovoCtrl.text = ppvUnitEfetivo != null
+        ? ppvUnitEfetivo.toStringAsFixed(2)
         : '';
     final ppvCx = m.ppvCxNovo;
     if (ppvCx != null) m.novoPreco = ppvCx;
@@ -685,6 +691,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
     if (val != null) {
       final ppvNovo = m.ppvUnitDeReajuste(val / 100);
       m.ppvUnitNovoOverride = ppvNovo;
+      m.ppvUnitNovoLimpo = false;
       if (ppvNovo != null) {
         _ppvUnitNovoCtrl.text = ppvNovo.toStringAsFixed(2);
         if (!vinculado) {
@@ -1073,7 +1080,9 @@ class _ItemMaterialState extends State<_ItemMaterial> {
           _ColInput(
             label: 'PPV Unit',
             controller: _ppvUnitOfertaCtrl,
-            hint: ppvUnitOferta != null ? ppvUnitOferta.toStringAsFixed(2) : '0,00',
+            hint: ppvUnitOferta != null
+                ? ppvUnitOferta.toStringAsFixed(2)
+                : '0,00',
             onChanged: _onPpvUnitOfertaChanged,
             onSubmitted: _onPpvUnitOfertaChanged,
             color: Colors.green.shade700,

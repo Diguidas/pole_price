@@ -71,6 +71,8 @@ class MaterialPreco {
   double? margemFlatOverride; // margem Pole novo (quando editado direto)
   double? margemOfertaOverride; // margem Pole oferta (quando editado direto)
 
+  bool ppvUnitNovoLimpo = false;
+
   MaterialPreco({
     required this.codigo,
     required this.description,
@@ -240,6 +242,7 @@ class MaterialPreco {
   /// PPV Unitário Novo = PPC_novo × (1 - Margem Cliente). Passo 1.
   /// Se o usuário editou diretamente o PPV, usa o override.
   double? get ppvUnitNovo {
+    if (ppvUnitNovoLimpo) return null; // limpeza explícita vence a fórmula
     if (ppvUnitNovoOverride != null) return ppvUnitNovoOverride;
     final ppc = ppcNovoEfetivo;
     final mf = margemFlatEfetiva;
