@@ -528,41 +528,67 @@ class _ItemMaterialState extends State<_ItemMaterial> {
   late final TextEditingController _reajusteCtrl;
   late final TextEditingController _reajusteOfertaCtrl;
 
+  // ── Focus nodes ────────────────────────────────────────────────────────
+  // Usados para NÃO sobrescrever o texto do campo que o usuário está
+  // digitando no momento (ver _atualizarControllersDaLinha) — sem isso, o
+  // resync (próprio ou disparado pelo vínculo pai/filho) reformata o campo
+  // a cada tecla e "briga" com a digitação (ex: tentar digitar "25" vira
+  // "2.00" e depois "5.00").
+  final FocusNode _ppcNovoFocus = FocusNode();
+  final FocusNode _ppvUnitNovoFocus = FocusNode();
+  final FocusNode _ppvCxNovoFocus = FocusNode();
+  final FocusNode _reajusteFocus = FocusNode();
+
   MaterialPreco get m => widget.material;
+
+  String _textoPpc() =>
+      m.ppcNovoOverride != null ? m.ppcNovoOverride!.toStringAsFixed(2) : '';
+
+  String _textoPpvUnit() {
+    if (m.ppvUnitNovoLimpo) return '';
+    final v = m.ppvUnitNovo;
+    return v != null ? v.toStringAsFixed(2) : '';
+  }
+
+  String _textoPpvCx() {
+    if (m.ppvUnitNovoLimpo) return '';
+    final v = m.ppvCxNovo;
+    return v != null ? v.toStringAsFixed(2) : '';
+  }
+
+  String _textoReajuste() {
+    final v = m.reajustePct;
+    return v != null ? (v * 100).toStringAsFixed(2) : '';
+  }
+
+  /// Atualiza todos os controllers desta linha a partir do modelo efetivo.
+  /// Pula o campo que está com foco no momento — reescrever o texto de um
+  /// campo enquanto o usuário digita nele reformata o valor (ex: "2" vira
+  /// "2.00") e sobrescreve o que ele está no meio de digitar.
+  void _atualizarControllersDaLinha() {
+    if (!_ppcNovoFocus.hasFocus) _ppcNovoCtrl.text = _textoPpc();
+    if (!_ppvUnitNovoFocus.hasFocus) _ppvUnitNovoCtrl.text = _textoPpvUnit();
+    if (!_ppvCxNovoFocus.hasFocus) _ppvCxNovoCtrl.text = _textoPpvCx();
+    if (!_reajusteFocus.hasFocus) _reajusteCtrl.text = _textoReajuste();
+  }
 
   @override
   void initState() {
     super.initState();
-    _ppcNovoCtrl = TextEditingController(
-      text: m.ppcNovoOverride != null
-          ? m.ppcNovoOverride!.toStringAsFixed(2)
-          : '',
-    );
+    _ppcNovoCtrl = TextEditingController(text: _textoPpc());
     _ppcOfertaCtrl = TextEditingController(
       text: m.ppcOfertaOverride != null
           ? m.ppcOfertaOverride!.toStringAsFixed(2)
           : '',
     );
-    _ppvUnitNovoCtrl = TextEditingController(
-      text: m.ppvUnitNovoOverride != null
-          ? m.ppvUnitNovoOverride!.toStringAsFixed(2)
-          : '',
-    );
-    _ppvCxNovoCtrl = TextEditingController(
-      text: m.ppvUnitNovoOverride != null && m.ppvCxNovo != null
-          ? m.ppvCxNovo!.toStringAsFixed(2)
-          : '',
-    );
+    _ppvUnitNovoCtrl = TextEditingController(text: _textoPpvUnit());
+    _ppvCxNovoCtrl = TextEditingController(text: _textoPpvCx());
     _ppvUnitOfertaCtrl = TextEditingController(
       text: m.ppvUnitOfertaOverride != null
           ? m.ppvUnitOfertaOverride!.toStringAsFixed(2)
           : '',
     );
-    _reajusteCtrl = TextEditingController(
-      text: m.reajusteOverride != null
-          ? (m.reajusteOverride! * 100).toStringAsFixed(2)
-          : '',
-    );
+    _reajusteCtrl = TextEditingController(text: _textoReajuste());
     _reajusteOfertaCtrl = TextEditingController();
     widget.controller.registerRefresh(m.codigo, _resincronizarControllers);
   }
@@ -572,17 +598,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
   /// outro (o TextEditingController não muda sozinho quando o override é
   /// setado de fora, já que o estado da linha sobrevive a rebuilds).
   void _resincronizarControllers() {
-    setState(() {
-      _ppcNovoCtrl.text = m.ppcNovoOverride != null
-          ? m.ppcNovoOverride!.toStringAsFixed(2)
-          : '';
-      final ppvUnit = m.ppvUnitNovo;
-      _ppvUnitNovoCtrl.text = ppvUnit != null ? ppvUnit.toStringAsFixed(2) : '';
-      final ppvCx = m.ppvCxNovo;
-      _ppvCxNovoCtrl.text = ppvCx != null ? ppvCx.toStringAsFixed(2) : '';
-      final reaj = m.reajustePct;
-      _reajusteCtrl.text = reaj != null ? (reaj * 100).toStringAsFixed(2) : '';
-    });
+    setState(_atualizarControllersDaLinha);
   }
 
   @override
@@ -595,61 +611,72 @@ class _ItemMaterialState extends State<_ItemMaterial> {
     _ppvUnitOfertaCtrl.dispose();
     _reajusteCtrl.dispose();
     _reajusteOfertaCtrl.dispose();
+    _ppcNovoFocus.dispose();
+    _ppvUnitNovoFocus.dispose();
+    _ppvCxNovoFocus.dispose();
+    _reajusteFocus.dispose();
     super.dispose();
   }
 
-  // ── Handlers bidirecionais (inalterados) ──────────────────────────────────
-
-  void _sincronizarPpvCxNovoCtrl() {
-    final ppvCx = m.ppvCxNovo;
-    _ppvCxNovoCtrl.text = ppvCx != null ? ppvCx.toStringAsFixed(2) : '';
-  }
+  // ── Handlers bidirecionais ────────────────────────────────────────────────
 
   void _onPpcNovoChanged(String v) {
     final val = double.tryParse(v.replaceAll(',', '.'));
     m.ppcNovoOverride = val;
-    m.ppvUnitNovoOverride = null;
-     m.ppvUnitNovoLimpo = false;
-    m.reajusteOverride = null;
-    widget.controller.aplicarVinculoAgrupamento(m, ppcMudou: true);
-    final ppvNovo = m.ppvUnitNovo;
-    _ppvUnitNovoCtrl.text = ppvNovo != null ? ppvNovo.toStringAsFixed(2) : '';
-    _sincronizarPpvCxNovoCtrl();
+    if (val == null) {
+      m.ppvUnitNovoOverride = null;
+      m.ppvUnitNovoLimpo = true;
+      m.reajusteOverride = null;
+    } else {
+      m.ppvUnitNovoOverride = null;
+      m.ppvUnitNovoLimpo = false;
+      m.reajusteOverride = null;
+    }
+    if (widget.controller.estaVinculado(m)) {
+      widget.controller.aplicarVinculoAgrupamento(m, ppcMudou: true);
+      _atualizarControllersDaLinha();
+      setState(() {});
+      widget.onChanged();
+      return;
+    }
     final ppvCx = m.ppvCxNovo;
     if (ppvCx != null) m.novoPreco = ppvCx;
+    _atualizarControllersDaLinha();
     setState(() {});
     widget.onChanged();
   }
 
   void _onPpcNovoConfirmado(String v) {
     _onPpcNovoChanged(v);
-    final ppvNovo = m.ppvUnitNovo;
-    if (ppvNovo != null) _ppvUnitNovoCtrl.text = ppvNovo.toStringAsFixed(2);
-    _sincronizarPpvCxNovoCtrl();
-    final reaj = m.reajustePct;
-    if (reaj != null) _reajusteCtrl.text = (reaj * 100).toStringAsFixed(2);
   }
 
   void _onPpvUnitNovoChanged(String v) {
     final val = double.tryParse(v.replaceAll(',', '.'));
     m.ppvUnitNovoOverride = val;
     m.ppvUnitNovoLimpo = val == null;
-    // Material vinculado (pai/filho com % de exceção): o PPC é sempre
-    // compartilhado, não é recalculado a partir do PPV — quem cuida disso
-    // é aplicarVinculoAgrupamento.
-    if (val != null && !widget.controller.estaVinculado(m)) {
+    final vinculado = widget.controller.estaVinculado(m);
+    if (val == null && vinculado) {
+      m.reajusteOverride = null;
+      widget.controller.aplicarVinculoAgrupamento(m);
+      _atualizarControllersDaLinha();
+      setState(() {});
+      widget.onChanged();
+      return;
+    }
+    if (val != null && !vinculado) {
       final ppcCalculado = m.ppcDePpvUnit(val);
       m.ppcNovoOverride = ppcCalculado;
-      if (ppcCalculado != null)
-        _ppcNovoCtrl.text = ppcCalculado.toStringAsFixed(2);
     }
-    widget.controller.aplicarVinculoAgrupamento(m);
-    _ppcNovoCtrl.text = m.ppcNovoOverride != null
-        ? m.ppcNovoOverride!.toStringAsFixed(2)
-        : '';
-    _sincronizarPpvCxNovoCtrl();
+    if (vinculado) {
+      widget.controller.aplicarVinculoAgrupamento(m);
+      _atualizarControllersDaLinha();
+      setState(() {});
+      widget.onChanged();
+      return;
+    }
     final ppvCx = m.ppvCxNovo;
     if (ppvCx != null) m.novoPreco = ppvCx;
+    _atualizarControllersDaLinha();
     setState(() {});
     widget.onChanged();
   }
@@ -662,24 +689,29 @@ class _ItemMaterialState extends State<_ItemMaterial> {
         : null;
     m.ppvUnitNovoOverride = ppvUnit;
     m.ppvUnitNovoLimpo = val == null;
-    if (ppvUnit != null && !widget.controller.estaVinculado(m)) {
+    final vinculado = widget.controller.estaVinculado(m);
+    if (val == null && vinculado) {
+      m.reajusteOverride = null;
+      widget.controller.aplicarVinculoAgrupamento(m);
+      _atualizarControllersDaLinha();
+      setState(() {});
+      widget.onChanged();
+      return;
+    }
+    if (ppvUnit != null && !vinculado) {
       final ppcCalculado = m.ppcDePpvUnit(ppvUnit);
       m.ppcNovoOverride = ppcCalculado;
-      if (ppcCalculado != null) {
-        _ppcNovoCtrl.text = ppcCalculado.toStringAsFixed(2);
-      }
     }
-    widget.controller.aplicarVinculoAgrupamento(m);
-    _ppcNovoCtrl.text = m.ppcNovoOverride != null
-        ? m.ppcNovoOverride!.toStringAsFixed(2)
-        : '';
-    // usa o valor EFETIVO (override ou fallback da fórmula), não o bruto digitado
-    final ppvUnitEfetivo = m.ppvUnitNovo;
-    _ppvUnitNovoCtrl.text = ppvUnitEfetivo != null
-        ? ppvUnitEfetivo.toStringAsFixed(2)
-        : '';
+    if (vinculado) {
+      widget.controller.aplicarVinculoAgrupamento(m);
+      _atualizarControllersDaLinha();
+      setState(() {});
+      widget.onChanged();
+      return;
+    }
     final ppvCx = m.ppvCxNovo;
     if (ppvCx != null) m.novoPreco = ppvCx;
+    _atualizarControllersDaLinha();
     setState(() {});
     widget.onChanged();
   }
@@ -688,26 +720,38 @@ class _ItemMaterialState extends State<_ItemMaterial> {
     final val = double.tryParse(v.replaceAll(',', '.'));
     m.reajusteOverride = val != null ? val / 100 : null;
     final vinculado = widget.controller.estaVinculado(m);
-    if (val != null) {
-      final ppvNovo = m.ppvUnitDeReajuste(val / 100);
-      m.ppvUnitNovoOverride = ppvNovo;
-      m.ppvUnitNovoLimpo = false;
-      if (ppvNovo != null) {
-        _ppvUnitNovoCtrl.text = ppvNovo.toStringAsFixed(2);
-        if (!vinculado) {
-          final ppcCalc = m.ppcDePpvUnit(ppvNovo);
-          m.ppcNovoOverride = ppcCalc;
-          if (ppcCalc != null) _ppcNovoCtrl.text = ppcCalc.toStringAsFixed(2);
-        }
+    if (val == null) {
+      m.ppvUnitNovoOverride = null;
+      m.ppvUnitNovoLimpo = true;
+      if (vinculado) {
+        widget.controller.aplicarVinculoAgrupamento(m, reajusteMudou: true);
+        _atualizarControllersDaLinha();
+        setState(() {});
+        widget.onChanged();
+        return;
       }
+      _atualizarControllersDaLinha();
+      setState(() {});
+      widget.onChanged();
+      return;
     }
-    widget.controller.aplicarVinculoAgrupamento(m);
-    _ppcNovoCtrl.text = m.ppcNovoOverride != null
-        ? m.ppcNovoOverride!.toStringAsFixed(2)
-        : '';
-    _sincronizarPpvCxNovoCtrl();
+    final ppvNovo = m.ppvUnitDeReajuste(val / 100);
+    m.ppvUnitNovoOverride = ppvNovo;
+    m.ppvUnitNovoLimpo = false;
+    if (ppvNovo != null && !vinculado) {
+      final ppcCalc = m.ppcDePpvUnit(ppvNovo);
+      m.ppcNovoOverride = ppcCalc;
+    }
+    if (vinculado) {
+      widget.controller.aplicarVinculoAgrupamento(m);
+      _atualizarControllersDaLinha();
+      setState(() {});
+      widget.onChanged();
+      return;
+    }
     final ppvCx = m.ppvCxNovo;
     if (ppvCx != null) m.novoPreco = ppvCx;
+    _atualizarControllersDaLinha();
     setState(() {});
     widget.onChanged();
   }
@@ -982,6 +1026,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
           _ColInput(
             label: 'PPV CX',
             controller: _ppvCxNovoCtrl,
+            focusNode: _ppvCxNovoFocus,
             hint: ppvCxNovo != null ? ppvCxNovo.toStringAsFixed(2) : '0,00',
             onChanged: _onPpvCxNovoChanged,
             onSubmitted: _onPpvCxNovoChanged,
@@ -990,6 +1035,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
           _ColInput(
             label: 'PPV Unit',
             controller: _ppvUnitNovoCtrl,
+            focusNode: _ppvUnitNovoFocus,
             hint: ppvUnitNovo != null ? ppvUnitNovo.toStringAsFixed(2) : '0,00',
             onChanged: _onPpvUnitNovoChanged,
             onSubmitted: _onPpvUnitNovoChanged,
@@ -998,6 +1044,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
           _ColInput(
             label: 'PPC Novo',
             controller: _ppcNovoCtrl,
+            focusNode: _ppcNovoFocus,
             hint: '0,00',
             onChanged: _onPpcNovoChanged,
             onSubmitted: _onPpcNovoConfirmado,
@@ -1032,6 +1079,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
           _ColInput(
             label: '% Reajuste',
             controller: _reajusteCtrl,
+            focusNode: _reajusteFocus,
             hint: reaj != null ? '${(reaj * 100).toStringAsFixed(1)}' : '0,0',
             flex: 2,
             onChanged: _onReajusteChanged,
@@ -1331,6 +1379,7 @@ class _Col extends StatelessWidget {
 class _ColInput extends StatelessWidget {
   final String label;
   final TextEditingController controller;
+  final FocusNode? focusNode;
   final String hint;
   final ValueChanged<String> onChanged;
   final ValueChanged<String> onSubmitted;
@@ -1343,6 +1392,7 @@ class _ColInput extends StatelessWidget {
   const _ColInput({
     required this.label,
     required this.controller,
+    this.focusNode,
     required this.hint,
     required this.onChanged,
     required this.onSubmitted,
@@ -1377,6 +1427,7 @@ class _ColInput extends StatelessWidget {
             const SizedBox(height: 4),
             TextField(
               controller: controller,
+              focusNode: focusNode,
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
