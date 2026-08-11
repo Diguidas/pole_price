@@ -8,6 +8,11 @@ class DraftAprovacao {
   final String? reviewedAt;
   final String? justificativa;
 
+  /// Quantidade de materiais deste draft que o SAP não confirmou (ver
+  /// coluna price_draft_items.sap_erro). Preenchido pela tela de Aprovações
+  /// ao cruzar com os itens do draft — não vem direto da tabela price_drafts.
+  final List<Map<String, dynamic>> falhas;
+
   DraftAprovacao({
     required this.id,
     required this.masterListName,
@@ -17,9 +22,15 @@ class DraftAprovacao {
     this.reviewedByEmail,
     this.reviewedAt,
     this.justificativa,
+    this.falhas = const [],
   });
 
-  factory DraftAprovacao.fromJson(Map<String, dynamic> json) {
+  bool get temFalhas => falhas.isNotEmpty;
+
+  factory DraftAprovacao.fromJson(
+    Map<String, dynamic> json, {
+    List<Map<String, dynamic>> falhas = const [],
+  }) {
     return DraftAprovacao(
       id: json['id']?.toString() ?? '',
       masterListName:
@@ -32,6 +43,7 @@ class DraftAprovacao {
       reviewedByEmail: json['reviewed_by_email']?.toString(),
       reviewedAt: json['reviewed_at']?.toString(),
       justificativa: json['justificativa']?.toString(),
+      falhas: falhas,
     );
   }
 }

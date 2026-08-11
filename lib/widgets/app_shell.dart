@@ -15,6 +15,7 @@ import 'package:pole_price/screens/config_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pole_price/widgets/lista_picker.dart';
 import 'package:pole_price/widgets/grupo_picker.dart';
+import 'package:pole_price/widgets/background_task_overlay.dart';
 
 enum AppPage {
   home,
@@ -236,10 +237,15 @@ class _AppShellState extends State<AppShell> {
       state: this,
       child: Scaffold(
         backgroundColor: const Color(0xFFF4F6F8),
-        body: Row(
+        body: Stack(
           children: [
-            _AppSidebar(paginaAtiva: _paginaAtiva, onSelect: goTo),
-            Expanded(child: _buildPage(_paginaAtiva)),
+            Row(
+              children: [
+                _AppSidebar(paginaAtiva: _paginaAtiva, onSelect: goTo),
+                Expanded(child: _buildPage(_paginaAtiva)),
+              ],
+            ),
+            const BackgroundTaskOverlay(),
           ],
         ),
       ),
@@ -413,7 +419,7 @@ class _AppSidebarState extends State<_AppSidebar> {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 20, left: 24),
                   child: Text(
-                    'Versão 1.0.0',
+                    'Versão 0.0.4',
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight

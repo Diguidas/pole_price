@@ -1,6 +1,7 @@
 // definir_aprovacoes_screen.dart
 // Fatorado em widgets privados para manter o arquivo legível.
 import 'package:flutter/material.dart';
+import 'package:pole_price/controllers/background_task_controller.dart';
 import 'package:pole_price/controllers/permissao_controller.dart';
 import 'package:pole_price/models/draft_aprova_model.dart';
 import 'package:pole_price/service/draft_pricing_service.dart';
@@ -50,13 +51,41 @@ class _AprovacoesScreenState extends State<AprovacoesScreen> {
   Future<void> _buscarRascunhosPendentes() async {
     setState(() => _loadingDrafts = true);
     try {
-      final response = await Supabase.instance.client
+      // Materiais que o SAP não confirmou numa aprovação anterior — o draft
+      // já está 'approved', mas continua aparecendo aqui com uma tag de
+      // "Reprocessar" até esses itens específicos serem reenviados.
+      final falhaRows = await Supabase.instance.client
+          .from('price_draft_items')
+          .select('draft_id, product_id, sap_erro')
+          .not('sap_erro', 'is', null);
+
+      final falhasPorDraft = <String, List<Map<String, dynamic>>>{};
+      for (final r in falhaRows as List) {
+        final id = r['draft_id']?.toString();
+        if (id == null) continue;
+        falhasPorDraft.putIfAbsent(id, () => []).add({
+          'matnr': r['product_id']?.toString() ?? '',
+          'erro': r['sap_erro']?.toString() ?? 'motivo desconhecido',
+        });
+      }
+      final idsComFalha = falhasPorDraft.keys.toList();
+
+      final pendentesRes = await Supabase.instance.client
           .from('price_drafts')
           .select('id, status, created_at, master_list_id, created_by_email, justificativa')
           .eq('status', 'pending')
           .order('created_at', ascending: false);
 
-      final drafts = response as List;
+      final comFalhaRes = idsComFalha.isEmpty
+          ? <dynamic>[]
+          : await Supabase.instance.client
+                .from('price_drafts')
+                .select('id, status, created_at, master_list_id, created_by_email, justificativa')
+                .inFilter('id', idsComFalha)
+                .neq('status', 'pending') // evita duplicar quem já veio acima
+                .order('created_at', ascending: false);
+
+      final drafts = [...pendentesRes as List, ...comFalhaRes];
 
       // Busca nomes das listas pelo pltyp
       final pltyps = drafts
@@ -78,10 +107,11 @@ class _AprovacoesScreenState extends State<AprovacoesScreen> {
 
       final lista = drafts.map((j) {
         final pltyp = j['master_list_id']?.toString();
-        return DraftAprovacao.fromJson({
-          ...j,
-          'lista_nome': nomePorPltyp[pltyp] ?? pltyp ?? '',
-        });
+        final id = j['id']?.toString() ?? '';
+        return DraftAprovacao.fromJson(
+          {...j, 'lista_nome': nomePorPltyp[pltyp] ?? pltyp ?? ''},
+          falhas: falhasPorDraft[id] ?? const [],
+        );
       }).toList();
 
       setState(() => _rascunhosPendentes = lista);
@@ -123,8 +153,23 @@ class _AprovacoesScreenState extends State<AprovacoesScreen> {
           .limit(1)
           .maybeSingle();
 
+      var linhas = preview.materiais.map((m) => m.toRowMap()).toList();
+
+      // Draft em modo "Reprocessar": mostra só os materiais que o SAP não
+      // confirmou (mãe e/ou filhas) — os que já deram certo não precisam
+      // aparecer de novo aqui.
+      if (draft.temFalhas) {
+        final matnrsComFalha = draft.falhas
+            .map((f) => f['matnr']?.toString())
+            .whereType<String>()
+            .toSet();
+        linhas = linhas
+            .where((m) => matnrsComFalha.contains(m['product_id']?.toString()))
+            .toList();
+      }
+
       setState(() {
-        _materiais = preview.materiais.map((m) => m.toRowMap()).toList();
+        _materiais = linhas;
         _detalheCabecalho = preview.resumo;
         _datab = vigRow?['datab']?.toString() ?? '';
         _datbi = vigRow?['datbi']?.toString() ?? '';
@@ -136,35 +181,92 @@ class _AprovacoesScreenState extends State<AprovacoesScreen> {
     }
   }
 
-  Future<void> _aprovarRascunho() async {
+  /// Publica um draft no SAP e grava quem aprovou. Se algum material não for
+  /// confirmado, lança SapPushFalhasException e o draft continua 'pending'
+  /// (ver DraftPricingService.applyDraft) — fica disponível aqui para tentar
+  /// de novo sem precisar recriar a lista.
+  Future<int> _executarAprovacao(String draftId, String reviewerEmail) async {
+    final priceService = PriceService(Supabase.instance.client);
+    final total = await priceService.approveDraft(draftId);
+
+    await Supabase.instance.client
+        .from('price_drafts')
+        .update({
+          'reviewed_by_email': reviewerEmail,
+          'reviewed_at': DateTime.now().toIso8601String(),
+        })
+        .eq('id', draftId);
+
+    return total;
+  }
+
+  /// Dispara a publicação em segundo plano (BackgroundTaskController) e
+  /// libera a tela na hora — o usuário pode navegar livremente enquanto o
+  /// SAP processa. O resultado (sucesso ou lista de materiais com falha)
+  /// fica disponível no card flutuante no canto inferior da tela.
+  void _aprovarRascunho() {
     if (_rascunhoSelecionado == null) return;
-    setState(() => _aprovando = true);
-    try {
-      final draftId = _rascunhoSelecionado!.id;
-      final reviewerEmail =
-          Supabase.instance.client.auth.currentUser?.email ?? 'desconhecido';
+    final draft = _rascunhoSelecionado!;
+    final draftId = draft.id;
+    final reviewerEmail =
+        Supabase.instance.client.auth.currentUser?.email ?? 'desconhecido';
+    final taskId = 'aprovar_draft_$draftId';
 
-      // Envia ao SAP e salva no Supabase (applyDraft + pushToSap)
-      final priceService = PriceService(Supabase.instance.client);
-      await priceService.approveDraft(draftId);
+    BackgroundTaskController.instance.run(
+      id: taskId,
+      title: 'Publicar preços — ${draft.masterListName}',
+      action: () => _executarAprovacao(draftId, reviewerEmail),
+    );
 
-      // Salva quem aprovou e quando
-      await Supabase.instance.client
-          .from('price_drafts')
-          .update({
-            'reviewed_by_email': reviewerEmail,
-            'reviewed_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', draftId);
+    // Assim que a tarefa concluir (sucesso ou falha), atualiza a lista de
+    // pendentes se a tela ainda estiver aberta — os materiais que o SAP não
+    // confirmou reaparecem aqui com a tag "Reprocessar", só eles.
+    _aguardarConclusaoEAtualizar(taskId);
 
-      _snack('Preços publicados com sucesso no SAP e Supabase.', Colors.green);
-      _limparSelecao();
-      _buscarRascunhosPendentes();
-    } catch (e) {
-      _snack('Erro ao aprovar: $e', Colors.red);
-    } finally {
-      setState(() => _aprovando = false);
-    }
+    _snack(
+      'Publicação enviada para o SAP em segundo plano. '
+      'Acompanhe pelo card no canto inferior da tela.',
+      Colors.blueGrey,
+    );
+    _limparSelecao();
+  }
+
+  /// Reenvia só os materiais marcados com falha deste draft (sap_erro),
+  /// também em segundo plano — não precisa reabrir/recriar a lista.
+  void _reprocessarRascunho() {
+    if (_rascunhoSelecionado == null) return;
+    final draft = _rascunhoSelecionado!;
+    final draftId = draft.id;
+    final taskId = 'reprocessar_draft_$draftId';
+
+    BackgroundTaskController.instance.run(
+      id: taskId,
+      title: 'Reprocessar falhas — ${draft.masterListName}',
+      action: () =>
+          PriceService(Supabase.instance.client).reprocessarFalhas(draftId),
+    );
+
+    _aguardarConclusaoEAtualizar(taskId);
+
+    _snack(
+      'Reprocessamento enviado para o SAP em segundo plano. '
+      'Acompanhe pelo card no canto inferior da tela.',
+      Colors.blueGrey,
+    );
+    _limparSelecao();
+  }
+
+  void _aguardarConclusaoEAtualizar(String taskId) {
+    late final VoidCallback listener;
+    listener = () {
+      final task = BackgroundTaskController.instance.tasks
+          .where((t) => t.id == taskId)
+          .firstOrNull;
+      if (task == null || task.status == BgTaskStatus.running) return;
+      BackgroundTaskController.instance.removeListener(listener);
+      if (mounted) _buscarRascunhosPendentes();
+    };
+    BackgroundTaskController.instance.addListener(listener);
   }
 
   Future<void> _rejeitarRascunho() async {
@@ -314,6 +416,7 @@ class _AprovacoesScreenState extends State<AprovacoesScreen> {
                     materiaisFiltrados: _materiaisFiltrados,
                     onAprovar: _aprovarRascunho,
                     onRejeitar: _rejeitarRascunho,
+                    onReprocessar: _reprocessarRascunho,
                     onToggleLista: _toggleLista,
                     onFiltroTab: (v) => setState(() => _filtroTab = v),
                     onBusca: (v) => setState(() => _busca = v),
@@ -327,7 +430,7 @@ class _AprovacoesScreenState extends State<AprovacoesScreen> {
   static String _statusLabel(Map<String, dynamic> item) {
     if (item['foi_editado'] != true) return 'Sem alteração';
     final origem = item['origem']?.toString() ?? '';
-    if (origem.startsWith('Reajuste')) return 'Exceção manual';
+    if (origem.startsWith('Ajuste manual')) return 'Exceção manual';
     return 'Alterado';
   }
 }
@@ -452,13 +555,43 @@ class _DraftCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      nomeExibicao,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                        color: selected ? _laranja : Colors.grey.shade900,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            nomeExibicao,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                              color: selected
+                                  ? _laranja
+                                  : Colors.grey.shade900,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (draft.temFalhas)
+                          Container(
+                            margin: const EdgeInsets.only(left: 6),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade50,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.red.shade200),
+                            ),
+                            child: Text(
+                              'Reprocessar',
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.red.shade700,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 4),
                     if (draft.justificativa != null &&
@@ -557,6 +690,7 @@ class _PainelDetalhes extends StatelessWidget {
   materiaisFiltrados;
   final VoidCallback onAprovar;
   final VoidCallback onRejeitar;
+  final VoidCallback onReprocessar;
   final void Function(String) onToggleLista;
   final void Function(String) onFiltroTab;
   final void Function(String) onBusca;
@@ -578,6 +712,7 @@ class _PainelDetalhes extends StatelessWidget {
     required this.materiaisFiltrados,
     required this.onAprovar,
     required this.onRejeitar,
+    required this.onReprocessar,
     required this.onToggleLista,
     required this.onFiltroTab,
     required this.onBusca,
@@ -596,6 +731,7 @@ class _PainelDetalhes extends StatelessWidget {
           podeAprovar: podeAprovar,
           onAprovar: onAprovar,
           onRejeitar: onRejeitar,
+          onReprocessar: onReprocessar,
         ),
         Expanded(
           child: SingleChildScrollView(
@@ -660,6 +796,7 @@ class _Cabecalho extends StatelessWidget {
   final bool podeAprovar;
   final VoidCallback onAprovar;
   final VoidCallback onRejeitar;
+  final VoidCallback onReprocessar;
 
   const _Cabecalho({
     required this.draft,
@@ -669,6 +806,7 @@ class _Cabecalho extends StatelessWidget {
     required this.podeAprovar,
     required this.onAprovar,
     required this.onRejeitar,
+    required this.onReprocessar,
   });
 
   @override
@@ -790,12 +928,92 @@ class _Cabecalho extends StatelessWidget {
                         ),
                       ),
                     ],
+                    // Materiais que o SAP não confirmou numa aprovação anterior
+                    if (draft.temFalhas) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.red.shade200),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.error_outline,
+                                  size: 15,
+                                  color: Colors.red.shade700,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  '${draft.falhas.length} material(is) não confirmado(s) no SAP',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.red.shade700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxHeight: 160),
+                              child: SingleChildScrollView(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: draft.falhas
+                                      .map(
+                                        (f) => Padding(
+                                          padding: const EdgeInsets.only(top: 2),
+                                          child: Text(
+                                            '${f['matnr']}  —  ${f['erro']}',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.red.shade600,
+                                            ),
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
-              _badge('Pendente', _laranja.withOpacity(0.1), _laranja),
+              draft.temFalhas
+                  ? _badge('Com pendências', Colors.red.shade50, Colors.red.shade700)
+                  : _badge('Pendente', _laranja.withOpacity(0.1), _laranja),
               const SizedBox(width: 12),
-              if (podeAprovar) ...[
+              if (podeAprovar && draft.temFalhas) ...[
+                ElevatedButton.icon(
+                  onPressed: aprovando ? null : onReprocessar,
+                  icon: const Icon(Icons.refresh_rounded, size: 18),
+                  label: Text(
+                    'Reprocessar (${draft.falhas.length})',
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red.shade700,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 14,
+                    ),
+                  ),
+                ),
+              ] else if (podeAprovar) ...[
                 OutlinedButton(
                   onPressed: aprovando ? null : onRejeitar,
                   style: OutlinedButton.styleFrom(
@@ -1054,7 +1272,7 @@ class _FiltrosEBusca extends StatelessWidget {
   static String _statusLabel(Map<String, dynamic> item) {
     if (item['foi_editado'] != true) return 'Sem alteração';
     final origem = item['origem']?.toString() ?? '';
-    if (origem.startsWith('Reajuste')) return 'Exceção manual';
+    if (origem.startsWith('Ajuste manual')) return 'Exceção manual';
     return 'Alterado';
   }
 
@@ -1171,7 +1389,7 @@ class _TabelaMateriais extends StatelessWidget {
   static String _statusLabel(Map<String, dynamic> item) {
     if (item['foi_editado'] != true) return 'Sem alteração';
     final origem = item['origem']?.toString() ?? '';
-    if (origem.startsWith('Reajuste')) return 'Exceção manual';
+    if (origem.startsWith('Ajuste manual')) return 'Exceção manual';
     return 'Alterado';
   }
 
@@ -1393,7 +1611,7 @@ class _MaterialRow extends StatelessWidget {
   static String _statusLabel(Map<String, dynamic> item) {
     if (item['foi_editado'] != true) return 'Sem alteração';
     final origem = item['origem']?.toString() ?? '';
-    if (origem.startsWith('Reajuste')) return 'Exceção manual';
+    if (origem.startsWith('Ajuste manual')) return 'Exceção manual';
     return 'Alterado';
   }
 

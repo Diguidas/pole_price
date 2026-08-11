@@ -159,7 +159,7 @@ class _HistoricoDraftDetailScreenState
   static String _statusLabelItem(Map<String, dynamic> item) {
     if (item['foi_editado'] != true) return 'Sem alteração';
     final origem = item['origem']?.toString() ?? '';
-    if (origem.startsWith('Reajuste')) return 'Exceção manual';
+    if (origem.startsWith('Ajuste manual')) return 'Exceção manual';
     return 'Alterado';
   }
 
@@ -877,7 +877,7 @@ class _FiltrosBarra extends StatelessWidget {
   static String _statusLabel(Map<String, dynamic> item) {
     if (item['foi_editado'] != true) return 'Sem alteração';
     final origem = item['origem']?.toString() ?? '';
-    if (origem.startsWith('Reajuste')) return 'Exceção manual';
+    if (origem.startsWith('Ajuste manual')) return 'Exceção manual';
     return 'Alterado';
   }
 
@@ -1192,7 +1192,7 @@ class _LinhaItemState extends State<_LinhaItem> {
   static String _statusLabel(Map<String, dynamic> item) {
     if (item['foi_editado'] != true) return 'Sem alteração';
     final origem = item['origem']?.toString() ?? '';
-    if (origem.startsWith('Reajuste')) return 'Exceção manual';
+    if (origem.startsWith('Ajuste manual')) return 'Exceção manual';
     return 'Alterado';
   }
 

@@ -62,7 +62,16 @@ class PrecoController extends ChangeNotifier {
   final Map<String, VoidCallback> _refreshCallbacks = {};
   void registerRefresh(String codigo, VoidCallback cb) =>
       _refreshCallbacks[codigo] = cb;
-  void unregisterRefresh(String codigo) => _refreshCallbacks.remove(codigo);
+
+  /// Remove o callback somente se ele ainda pertencer à linha que está sendo
+  /// descartada. Isso evita que um dispose antigo, durante troca de pesquisa,
+  /// apague o callback de uma nova instância do mesmo material.
+  void unregisterRefresh(String codigo, VoidCallback cb) {
+    if (identical(_refreshCallbacks[codigo], cb)) {
+      _refreshCallbacks.remove(codigo);
+    }
+  }
+
   void refreshMaterial(String codigo) => _refreshCallbacks[codigo]?.call();
 
   /// Aplica o vínculo de preço (pai/filho) do agrupamento de [editado] após
@@ -522,6 +531,7 @@ class PrecoController extends ChangeNotifier {
                   kmein: m.kmein,
                   krech: m.krech,
                   mxwrt: m.mxwrt,
+                  gkwrt: m.gkwrt,
                   sapStatus: m.sapStatus,
                   origemMaterial: m.origemMaterial,
                   bloqueado: m.bloqueado,
@@ -886,6 +896,9 @@ class PrecoController extends ChangeNotifier {
           krech: row['krech']?.toString(),
           mxwrt: row['mxwrt'] != null
               ? double.tryParse(row['mxwrt'].toString())
+              : null,
+          gkwrt: row['gkwrt'] != null
+              ? double.tryParse(row['gkwrt'].toString())
               : null,
           sapStatus: row['sap_status']?.toString() ?? '',
           origemMaterial: row['origem_material'] == 'manual'

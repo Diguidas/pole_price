@@ -46,7 +46,12 @@ class MaterialPreco {
   final String? konwa; // moeda (ex: BRL)
   final String? kmein; // unidade de medida (ex: KG)
   final String? krech; // regra de cálculo (ex: C)
-  final double? mxwrt; // valor máximo
+
+  // Limites de preço da condição no SAP (VK11, tela de detalhe). Editáveis
+  // manualmente por material (botão "Limites SAP" na tela de Preços) —
+  // quando não informados, vão como 0,00 puro para o SAP, sem fallback.
+  double? mxwrt; // valor inferior
+  double? gkwrt; // valor superior
 
   // Status do preço na lista SAP: '' = normal, 'L' = bloqueado p/ liberação, 'X' = deletado
   String sapStatus;
@@ -97,6 +102,7 @@ class MaterialPreco {
     this.kmein,
     this.krech,
     this.mxwrt,
+    this.gkwrt,
     this.sapStatus = '',
     this.origemMaterial = OrigemMaterial.sap,
     this.removido = false,

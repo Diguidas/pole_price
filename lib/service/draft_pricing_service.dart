@@ -1,6 +1,26 @@
 import 'package:pole_price/models/material_draft_preview.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+/// Lançada quando o SAP confirma o recebimento do push, mas reporta que um
+/// ou mais materiais não foram efetivamente gravados (BDC do lado ABAP não
+/// confirmou a criação da nova vigência). O draft já foi marcado como
+/// aprovado neste ponto — isto é um aviso de inconsistência, não um erro
+/// que impede a aprovação.
+class SapPushFalhasException implements Exception {
+  final int total;
+  final List<Map<String, dynamic>> falhas;
+
+  SapPushFalhasException({required this.total, required this.falhas});
+
+  @override
+  String toString() {
+    final detalhes = falhas
+        .map((f) => '${f['matnr']}: ${f['erro'] ?? 'motivo desconhecido'}')
+        .join('; ');
+    return 'Publicado no SAP, mas $total material(is) não foram confirmados: $detalhes';
+  }
+}
+
 class _RegraMatch {
   final int prioridade;
   final String adjustType;
@@ -366,7 +386,7 @@ class DraftPricingService {
     final itemsRes = await supabase
         .from('price_draft_items')
         .select(
-          'product_id, new_price, datab, datbi, konwa, kmein, krech, mxwrt, sap_status, ppc_novo',
+          'product_id, new_price, datab, datbi, konwa, kmein, krech, mxwrt, gkwrt, sap_status, ppc_novo',
         )
         .eq('draft_id', draftId);
 
@@ -402,8 +422,12 @@ class DraftPricingService {
     final pids = items.map((i) => i['product_id']?.toString() ?? '').toList();
     final clusterMap = await _clusterMapForProducts(pids);
 
+    final falhas = <Map<String, dynamic>>[];
+
     // Envia lista mãe
-    await _enviarPayload(pltyp, _montarSapItems(items, clusterMap, []));
+    falhas.addAll(
+      await _enviarPayload(pltyp, _montarSapItems(items, clusterMap, [])),
+    );
 
     // Envia cada lista filha com regras aplicadas
     for (final target in targetsRes) {
@@ -414,20 +438,169 @@ class DraftPricingService {
           .where((e) => e['target_list_id']?.toString() == filhaPltyp)
           .toList();
 
-      await _enviarPayload(
-        filhaPltyp,
-        _montarSapItems(items, clusterMap, regrasFilha),
+      falhas.addAll(
+        await _enviarPayload(
+          filhaPltyp,
+          _montarSapItems(items, clusterMap, regrasFilha),
+        ),
       );
     }
 
-    await _gravarPpcHistorico(draftId, pltyp, targetsRes, items);
+    final falhaMatnrs = falhas
+        .map((f) => f['matnr']?.toString())
+        .whereType<String>()
+        .toSet();
+    final itensOk = items
+        .where((i) => !falhaMatnrs.contains(i['product_id']?.toString()))
+        .toList();
+
+    // Marca no price_draft_items só os materiais que o SAP não confirmou
+    // (coluna sap_erro) — os demais são aprovados normalmente. Assim o
+    // usuário só precisa reprocessar os itens problemáticos, sem reenviar
+    // (nem recriar) a lista inteira.
+    await _marcarFalhasNosItens(draftId, items, falhaMatnrs, falhas);
+
+    if (itensOk.isNotEmpty) {
+      await _gravarPpcHistorico(draftId, pltyp, targetsRes, itensOk);
+    }
 
     await supabase
         .from('price_drafts')
         .update({'status': 'approved'})
         .eq('id', draftId);
 
+    if (falhas.isNotEmpty) {
+      throw SapPushFalhasException(total: items.length, falhas: falhas);
+    }
+
     return items.length;
+  }
+
+  /// Reenvia ao SAP apenas os materiais deste draft marcados com sap_erro
+  /// (falharam numa aprovação anterior) — não recria nem reenvia os itens
+  /// que já foram confirmados.
+  Future<int> reprocessarFalhas(String draftId) async {
+    final itemsRes = await supabase
+        .from('price_draft_items')
+        .select(
+          'product_id, new_price, datab, datbi, konwa, kmein, krech, mxwrt, gkwrt, sap_status, ppc_novo',
+        )
+        .eq('draft_id', draftId)
+        .not('sap_erro', 'is', null);
+
+    final items = itemsRes as List;
+    if (items.isEmpty) {
+      throw Exception(
+        'Nenhum material pendente de reprocessamento neste rascunho.',
+      );
+    }
+
+    final draftData = await supabase
+        .from('price_drafts')
+        .select('master_list_id')
+        .eq('id', draftId)
+        .single();
+
+    final String pltyp = draftData['master_list_id']?.toString() ?? '';
+    if (pltyp.isEmpty) throw Exception('Draft sem lista mãe (pltyp) definida.');
+
+    final results = await Future.wait([
+      supabase
+          .from('price_draft_targets')
+          .select('target_list_id')
+          .eq('draft_id', draftId),
+      supabase
+          .from('price_draft_exceptions')
+          .select(
+            'target_list_id, level, adjust_type, value, cluster_id, material_id',
+          )
+          .eq('draft_id', draftId),
+    ]);
+
+    final targetsRes = results[0] as List;
+    final excecoesRes = results[1] as List;
+
+    final pids = items.map((i) => i['product_id']?.toString() ?? '').toList();
+    final clusterMap = await _clusterMapForProducts(pids);
+
+    final falhas = <Map<String, dynamic>>[];
+
+    falhas.addAll(
+      await _enviarPayload(pltyp, _montarSapItems(items, clusterMap, [])),
+    );
+
+    for (final target in targetsRes) {
+      final filhaPltyp = target['target_list_id']?.toString() ?? '';
+      if (filhaPltyp.isEmpty) continue;
+
+      final regrasFilha = excecoesRes
+          .where((e) => e['target_list_id']?.toString() == filhaPltyp)
+          .toList();
+
+      falhas.addAll(
+        await _enviarPayload(
+          filhaPltyp,
+          _montarSapItems(items, clusterMap, regrasFilha),
+        ),
+      );
+    }
+
+    final falhaMatnrs = falhas
+        .map((f) => f['matnr']?.toString())
+        .whereType<String>()
+        .toSet();
+    final itensOk = items
+        .where((i) => !falhaMatnrs.contains(i['product_id']?.toString()))
+        .toList();
+
+    await _marcarFalhasNosItens(draftId, items, falhaMatnrs, falhas);
+
+    if (itensOk.isNotEmpty) {
+      await _gravarPpcHistorico(draftId, pltyp, targetsRes, itensOk);
+    }
+
+    if (falhas.isNotEmpty) {
+      throw SapPushFalhasException(total: items.length, falhas: falhas);
+    }
+
+    return items.length;
+  }
+
+  /// Atualiza price_draft_items.sap_erro: limpa nos itens que agora foram
+  /// confirmados e grava a mensagem nos que continuam falhando.
+  Future<void> _marcarFalhasNosItens(
+    String draftId,
+    List items,
+    Set<String> falhaMatnrs,
+    List<Map<String, dynamic>> falhas,
+  ) async {
+    final erroPorMatnr = <String, String>{
+      for (final f in falhas)
+        (f['matnr']?.toString() ?? ''): (f['erro']?.toString() ??
+            'motivo desconhecido'),
+    };
+
+    final okIds = items
+        .map((i) => i['product_id']?.toString() ?? '')
+        .where((pid) => pid.isNotEmpty && !falhaMatnrs.contains(pid))
+        .toList();
+
+    if (okIds.isNotEmpty) {
+      await supabase
+          .from('price_draft_items')
+          .update({'sap_erro': null})
+          .eq('draft_id', draftId)
+          .inFilter('product_id', okIds);
+    }
+
+    for (final pid in falhaMatnrs) {
+      if (pid.isEmpty) continue;
+      await supabase
+          .from('price_draft_items')
+          .update({'sap_erro': erroPorMatnr[pid]})
+          .eq('draft_id', draftId)
+          .eq('product_id', pid);
+    }
   }
 
   /// Congela o PPC usado neste ciclo — vira o "PPC Atual" na próxima vez
@@ -489,6 +662,14 @@ class DraftPricingService {
       // enviar ao SAP.
       kbetr = double.parse(kbetr.toStringAsFixed(2));
 
+      // MXWRT (valor inferior) e GKWRT (valor superior) são os limites da
+      // condição de preço no SAP (tela VK11). Editáveis manualmente por
+      // material (botão "Limites SAP" na tela de Preços) — quando não
+      // informados, vão como 0,00 puro para o SAP, sem nenhum fallback
+      // automático para o KBETR.
+      final mxwrt = _toDouble(item['mxwrt']) ?? 0.0;
+      final gkwrt = _toDouble(item['gkwrt']) ?? 0.0;
+
       return {
         'MATNR': matnr,
         'KBETR': kbetr,
@@ -497,13 +678,16 @@ class DraftPricingService {
         'KRECH': item['krech']?.toString() ?? 'C',
         'DATAB': item['datab']?.toString() ?? '',
         'DATBI': item['datbi']?.toString() ?? '',
-        'MXWRT': _toDouble(item['mxwrt']) ?? 0.0,
+        'MXWRT': mxwrt,
+        'GKWRT': gkwrt,
         'STATUS': item['sap_status']?.toString() ?? '',
       };
     }).toList();
   }
 
-  Future<void> _enviarPayload(
+  /// Envia o payload ao SAP e retorna a lista de falhas por material que o
+  /// ABAP reportou (BDC não confirmada) — vazia quando tudo foi gravado.
+  Future<List<Map<String, dynamic>>> _enviarPayload(
     String pltyp,
     List<Map<String, dynamic>> sapItems,
   ) async {
@@ -517,6 +701,31 @@ class DraftPricingService {
         'Falha ao enviar lista $pltyp (${res.status}): ${res.data}',
       );
     }
+
+    final data = res.data;
+    final falhasRaw = data is Map ? data['falhas'] : null;
+    if (falhasRaw is! List || falhasRaw.isEmpty) return [];
+
+    return falhasRaw
+        .whereType<Map>()
+        .map(
+          (f) => {
+            'pltyp': pltyp,
+            // Normaliza zeros à esquerda: o product_id salvo no draft nunca
+            // tem (ver sap_sync_service._mapEntriesToMateriais), mas o SAP
+            // pode devolver o matnr convertido via CONVERSION_EXIT_ALPHA_INPUT
+            // (ex.: "000000000000300575"). Sem isso, a falha nunca casa com
+            // o item do draft e sap_erro nunca é gravado.
+            'matnr': _semZerosEsquerda(f['matnr']?.toString() ?? '?'),
+            'erro': f['erro']?.toString() ?? 'motivo desconhecido',
+          },
+        )
+        .toList();
+  }
+
+  String _semZerosEsquerda(String matnr) {
+    final semZeros = matnr.replaceFirst(RegExp(r'^0+(?=.)'), '');
+    return semZeros.isEmpty ? matnr : semZeros;
   }
 
   Future<Map<String, String>> _clusterMapForProducts(List<String> codes) async {

@@ -527,6 +527,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
   late final TextEditingController _ppvUnitOfertaCtrl;
   late final TextEditingController _reajusteCtrl;
   late final TextEditingController _reajusteOfertaCtrl;
+  late final VoidCallback _refreshCallback;
 
   // ── Focus nodes ────────────────────────────────────────────────────────
   // Usados para NÃO sobrescrever o texto do campo que o usuário está
@@ -590,7 +591,30 @@ class _ItemMaterialState extends State<_ItemMaterial> {
     );
     _reajusteCtrl = TextEditingController(text: _textoReajuste());
     _reajusteOfertaCtrl = TextEditingController();
-    widget.controller.registerRefresh(m.codigo, _resincronizarControllers);
+    _refreshCallback = _resincronizarControllers;
+    widget.controller.registerRefresh(m.codigo, _refreshCallback);
+  }
+
+  @override
+  void didUpdateWidget(covariant _ItemMaterial oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    // Se a linha recebeu outro controller/material, transfere o registro.
+    // Normalmente o ValueKey(codigo) mantém a mesma linha, mas esta proteção
+    // evita callback órfão em mudanças de lista/pesquisa.
+    if (oldWidget.controller != widget.controller ||
+        oldWidget.material.codigo != widget.material.codigo) {
+      oldWidget.controller.unregisterRefresh(
+        oldWidget.material.codigo,
+        _refreshCallback,
+      );
+      widget.controller.registerRefresh(m.codigo, _refreshCallback);
+    }
+
+    // Ao voltar para um resultado pesquisado, sincroniza os controllers com
+    // o modelo atual. Campos em edição não são sobrescritos porque o método
+    // abaixo respeita os FocusNodes.
+    _atualizarControllersDaLinha();
   }
 
   /// Resincroniza os campos de texto a partir do modelo — chamado quando o
@@ -598,12 +622,13 @@ class _ItemMaterialState extends State<_ItemMaterial> {
   /// outro (o TextEditingController não muda sozinho quando o override é
   /// setado de fora, já que o estado da linha sobrevive a rebuilds).
   void _resincronizarControllers() {
+    if (!mounted) return;
     setState(_atualizarControllersDaLinha);
   }
 
   @override
   void dispose() {
-    widget.controller.unregisterRefresh(m.codigo);
+    widget.controller.unregisterRefresh(m.codigo, _refreshCallback);
     _ppcNovoCtrl.dispose();
     _ppcOfertaCtrl.dispose();
     _ppvUnitNovoCtrl.dispose();
@@ -616,6 +641,24 @@ class _ItemMaterialState extends State<_ItemMaterial> {
     _ppvCxNovoFocus.dispose();
     _reajusteFocus.dispose();
     super.dispose();
+  }
+
+  // ── Limites SAP (MXWRT/GKWRT) ────────────────────────────────────────────
+
+  Future<void> _abrirLimitesSap() async {
+    final resultado = await showDialog<_LimitesSap>(
+      context: context,
+      builder: (_) => _LimitesSapDialog(
+        material: m.description.isNotEmpty ? m.description : m.codigo,
+        valorInferior: m.mxwrt,
+        valorSuperior: m.gkwrt,
+      ),
+    );
+    if (resultado == null) return;
+    m.mxwrt = resultado.inferior;
+    m.gkwrt = resultado.superior;
+    setState(() {});
+    widget.onChanged();
   }
 
   // ── Handlers bidirecionais ────────────────────────────────────────────────
@@ -922,6 +965,19 @@ class _ItemMaterialState extends State<_ItemMaterial> {
                   style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
                 ),
               ),
+            IconButton(
+              icon: Icon(
+                Icons.rule_rounded,
+                size: 17,
+                color: (m.mxwrt != null || m.gkwrt != null)
+                    ? _laranja
+                    : Colors.grey.shade300,
+              ),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32),
+              tooltip: 'Limites SAP (valor inferior / superior)',
+              onPressed: _abrirLimitesSap,
+            ),
             IconButton(
               icon: Icon(
                 Icons.delete_outline,
@@ -1488,6 +1544,129 @@ class _ColInput extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Diálogo: Limites SAP (MXWRT = valor inferior, GKWRT = valor superior)
+// ─────────────────────────────────────────────────────────────────────────────
+class _LimitesSap {
+  final double? inferior;
+  final double? superior;
+  const _LimitesSap({this.inferior, this.superior});
+}
+
+class _LimitesSapDialog extends StatefulWidget {
+  final String material;
+  final double? valorInferior;
+  final double? valorSuperior;
+
+  const _LimitesSapDialog({
+    required this.material,
+    this.valorInferior,
+    this.valorSuperior,
+  });
+
+  @override
+  State<_LimitesSapDialog> createState() => _LimitesSapDialogState();
+}
+
+class _LimitesSapDialogState extends State<_LimitesSapDialog> {
+  late final TextEditingController _inferiorCtrl;
+  late final TextEditingController _superiorCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _inferiorCtrl = TextEditingController(
+      text: widget.valorInferior != null
+          ? widget.valorInferior!.toStringAsFixed(2).replaceAll('.', ',')
+          : '',
+    );
+    _superiorCtrl = TextEditingController(
+      text: widget.valorSuperior != null
+          ? widget.valorSuperior!.toStringAsFixed(2).replaceAll('.', ',')
+          : '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _inferiorCtrl.dispose();
+    _superiorCtrl.dispose();
+    super.dispose();
+  }
+
+  double? _parse(String v) {
+    final s = v.trim();
+    if (s.isEmpty) return null;
+    return double.tryParse(s.replaceAll(',', '.'));
+  }
+
+  void _confirmar() {
+    Navigator.of(context).pop(
+      _LimitesSap(
+        inferior: _parse(_inferiorCtrl.text),
+        superior: _parse(_superiorCtrl.text),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Limites SAP (VK11)', style: TextStyle(fontSize: 16)),
+      content: SizedBox(
+        width: 340,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.material,
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _inferiorCtrl,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Valor inferior (MXWRT)',
+                hintText: 'Vazio = 0,00',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _superiorCtrl,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Valor superior (GKWRT)',
+                hintText: 'Vazio = 0,00',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Se deixar em branco, o valor vai como 0,00 para o SAP.',
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: _confirmar,
+          style: FilledButton.styleFrom(backgroundColor: _laranja),
+          child: const Text('Confirmar'),
+        ),
+      ],
     );
   }
 }

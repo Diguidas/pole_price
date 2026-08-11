@@ -326,6 +326,7 @@ class PriceService {
             'kmein': m.kmein,
             'krech': m.krech,
             'mxwrt': m.mxwrt,
+            'gkwrt': m.gkwrt,
             'sap_status': sapStatus,
             'cpv': m.cpv,
             'kg_sug': m.kgSug,
@@ -378,8 +379,12 @@ class PriceService {
     return resolvedId;
   }
 
-  Future<void> approveDraft(String draftId) async {
-    await draftPricing.applyDraft(draftId);
+  Future<int> approveDraft(String draftId) async {
+    return draftPricing.applyDraft(draftId);
+  }
+
+  Future<int> reprocessarFalhas(String draftId) async {
+    return draftPricing.reprocessarFalhas(draftId);
   }
 
   String _mapNivel(String n) {
