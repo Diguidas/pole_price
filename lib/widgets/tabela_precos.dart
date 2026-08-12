@@ -1575,6 +1575,7 @@ class _LimitesSapDialog extends StatefulWidget {
 class _LimitesSapDialogState extends State<_LimitesSapDialog> {
   late final TextEditingController _inferiorCtrl;
   late final TextEditingController _superiorCtrl;
+  String? _erro;
 
   @override
   void initState() {
@@ -1605,12 +1606,18 @@ class _LimitesSapDialogState extends State<_LimitesSapDialog> {
   }
 
   void _confirmar() {
-    Navigator.of(context).pop(
-      _LimitesSap(
-        inferior: _parse(_inferiorCtrl.text),
-        superior: _parse(_superiorCtrl.text),
-      ),
-    );
+    final inferior = _parse(_inferiorCtrl.text);
+    final superior = _parse(_superiorCtrl.text);
+    // Os dois limites viram MXWRT/GKWRT no VK11 e o SAP rejeita a condição
+    // quando só um deles está preenchido (mensagem VK023) — por isso não
+    // deixamos confirmar com só um dos dois valores informado.
+    if ((inferior == null) != (superior == null)) {
+      setState(() {
+        _erro = 'Preencha os dois limites (inferior e superior) ou deixe os dois em branco.';
+      });
+      return;
+    }
+    Navigator.of(context).pop(_LimitesSap(inferior: inferior, superior: superior));
   }
 
   @override
@@ -1650,9 +1657,17 @@ class _LimitesSapDialogState extends State<_LimitesSapDialog> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Se deixar em branco, o valor vai como 0,00 para o SAP.',
+              'Se deixar os dois em branco, nenhum limite é enviado. '
+              'Se preencher um, o outro também precisa ser preenchido.',
               style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
             ),
+            if (_erro != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _erro!,
+                style: TextStyle(fontSize: 12, color: Colors.red.shade700),
+              ),
+            ],
           ],
         ),
       ),

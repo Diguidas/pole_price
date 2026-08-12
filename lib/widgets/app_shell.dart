@@ -419,7 +419,7 @@ class _AppSidebarState extends State<_AppSidebar> {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 20, left: 24),
                   child: Text(
-                    'Versão 0.0.4',
+                    'Versão 0.0.5',
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight

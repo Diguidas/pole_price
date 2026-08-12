@@ -715,9 +715,13 @@ class PrecoController extends ChangeNotifier {
         (r) => r.targetListId == lista.pltyp && r.nivel == 'Tabela',
       );
       if (jaTemRegraManual) continue;
-      if (lista.excecaoFlatPct == null || lista.excecaoFlatPct == 0) continue;
 
-      final margemFilha = politica.margemFlat! + lista.excecaoFlatPct!;
+      final margemFilha = politica.margemFlat! + (lista.excecaoFlatPct ?? 0);
+      // Compara a margem efetiva das duas listas (não só o excecaoFlatPct
+      // da lista alvo) — a exceção pode estar gravada em qualquer uma das
+      // duas pontas (ex.: a mãe de hoje é a filha de quando a exceção foi
+      // criada), então o que importa é se as margens divergem.
+      if (margemFilha == margemMae) continue;
       if (margemFilha >= 1) continue;
       final deltaPct = ((1 - margemFilha) / (1 - margemMae) - 1) * 100;
 
@@ -976,6 +980,7 @@ class PrecoController extends ChangeNotifier {
                 kmein: m.kmein,
                 krech: m.krech,
                 mxwrt: m.mxwrt,
+                gkwrt: m.gkwrt,
                 sapStatus: m.sapStatus,
                 origemMaterial: m.origemMaterial,
                 bloqueado: m.bloqueado,

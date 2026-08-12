@@ -355,5 +355,5 @@ String get _redirectUrl {
   if (host == 'localhost') {
     return 'http://localhost:3000';
   }
-  return 'https://pole-price-c54ef.web.app/';
+  return Uri.base.origin;
 }

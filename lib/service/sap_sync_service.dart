@@ -338,10 +338,11 @@ class SapSyncService {
         final konwa = (m['KONWA'] ?? m['konwa'])?.toString();
         final kmein = (m['KMEIN'] ?? m['kmein'])?.toString();
         final krech = (m['KRECH'] ?? m['krech'])?.toString();
-        final mxwrtRaw = m['MXWRT'] ?? m['mxwrt'];
-        final mxwrt = mxwrtRaw != null
-            ? double.tryParse(mxwrtRaw.toString())
-            : null;
+        // MXWRT/GKWRT NÃO são lidos do SAP aqui de propósito: são limites
+        // editáveis só pelo pop-up "Limites SAP" no app. Se o material já
+        // tiver esses valores gravados na condição do SAP, eles não devem
+        // aparecer sozinhos sem o usuário ter passado pelo pop-up nesta
+        // sessão — evita mandar um limite "meio" preenchido de volta.
         final peso = pesoMap[matnr];
 
         result.add(
@@ -374,7 +375,6 @@ class SapSyncService {
             konwa: konwa,
             kmein: kmein,
             krech: krech,
-            mxwrt: mxwrt,
             bloqueado: _isX(m['LOEVM_KO'] ?? m['loevm_ko']),
             inativo: _isX(m['KZNEP'] ?? m['kznep']),
           ),

@@ -4,6 +4,17 @@
     "pole-price": "pole-price",
     "pole": "pole-price"
   },
-  "targets": {},
+  "targets": {
+    "pole-price": {
+      "hosting": {
+        "prd": [
+          "pole-price-c54ef"
+        ],
+        "qas": [
+          "pole-price-qas"
+        ]
+      }
+    }
+  },
   "etags": {}
 }
