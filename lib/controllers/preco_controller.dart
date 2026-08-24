@@ -74,6 +74,50 @@ class PrecoController extends ChangeNotifier {
 
   void refreshMaterial(String codigo) => _refreshCallbacks[codigo]?.call();
 
+  // ── Limites SAP por agrupamento (% em massa) ───────────────────────────
+
+  /// Materiais ativos da lista atual, agrupados por `agrupamentoPreco`
+  /// (chave `'(sem agrupamento)'` para quem não tem), na ordem de primeira
+  /// aparição — mesmo conceito de agrupamento usado em materials_screen.dart.
+  Map<String, List<MaterialPreco>> get materiaisPorAgrupamento {
+    final mapa = <String, List<MaterialPreco>>{};
+    for (final m in materiais.where((m) => !m.removido)) {
+      final chave = m.agrupamentoPreco ?? '(sem agrupamento)';
+      mapa.putIfAbsent(chave, () => []).add(m);
+    }
+    return mapa;
+  }
+
+  /// Última % aplicada por agrupamento nesta sessão (só para repopular o
+  /// dialog "Limites SAP" geral quando reaberto — não é persistido).
+  final Map<String, ({double? menos, double? mais})> percentuaisPorAgrupamento = {};
+
+  /// Aplica (ou limpa) o MXWRT/GKWRT de cada material não travado
+  /// manualmente (`mxwrtGkwrtManual == true`) dos agrupamentos em [ajustes],
+  /// calculando a % sobre o PPV CX de cada material.
+  void aplicarLimitesPorAgrupamento(
+    Map<String, ({double? menos, double? mais})> ajustes,
+  ) {
+    final grupos = materiaisPorAgrupamento;
+    for (final entrada in ajustes.entries) {
+      final agrupamento = entrada.key;
+      final pct = entrada.value;
+      percentuaisPorAgrupamento[agrupamento] = pct;
+      for (final m in grupos[agrupamento] ?? const <MaterialPreco>[]) {
+        if (m.mxwrtGkwrtManual) continue;
+        if (pct.menos == null && pct.mais == null) {
+          m.mxwrt = null;
+          m.gkwrt = null;
+          continue;
+        }
+        final base = m.ppvCxNovo ?? m.precoAtual;
+        m.mxwrt = pct.menos == null ? null : base * (1 - pct.menos! / 100);
+        m.gkwrt = pct.mais == null ? null : base * (1 + pct.mais! / 100);
+      }
+    }
+    notifyListeners();
+  }
+
   /// Aplica o vínculo de preço (pai/filho) do agrupamento de [editado] após
   /// o PPC Novo dele ter sido alterado: se [editado] é pai, recalcula os
   /// filhos diretos; se é filho, recalcula o pai e propaga aos irmãos

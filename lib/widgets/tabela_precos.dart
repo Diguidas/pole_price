@@ -650,6 +650,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
       context: context,
       builder: (_) => _LimitesSapDialog(
         material: m.description.isNotEmpty ? m.description : m.codigo,
+        baseValue: m.ppvCxNovo ?? m.precoAtual,
         valorInferior: m.mxwrt,
         valorSuperior: m.gkwrt,
       ),
@@ -657,6 +658,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
     if (resultado == null) return;
     m.mxwrt = resultado.inferior;
     m.gkwrt = resultado.superior;
+    m.mxwrtGkwrtManual = resultado.inferior != null || resultado.superior != null;
     setState(() {});
     widget.onChanged();
   }
@@ -969,13 +971,17 @@ class _ItemMaterialState extends State<_ItemMaterial> {
               icon: Icon(
                 Icons.rule_rounded,
                 size: 17,
-                color: (m.mxwrt != null || m.gkwrt != null)
+                color: m.mxwrtGkwrtManual
                     ? _laranja
-                    : Colors.grey.shade300,
+                    : (m.mxwrt != null || m.gkwrt != null)
+                        ? Colors.teal
+                        : Colors.grey.shade300,
               ),
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 32),
-              tooltip: 'Limites SAP (valor inferior / superior)',
+              tooltip: m.mxwrtGkwrtManual
+                  ? 'Limites SAP (travado manualmente)'
+                  : 'Limites SAP (valor inferior / superior)',
               onPressed: _abrirLimitesSap,
             ),
             IconButton(
@@ -1557,13 +1563,17 @@ class _LimitesSap {
   const _LimitesSap({this.inferior, this.superior});
 }
 
+enum _ModoLimite { valor, percentual }
+
 class _LimitesSapDialog extends StatefulWidget {
   final String material;
+  final double baseValue; // PPV CX usado como base do % (para baixo/cima)
   final double? valorInferior;
   final double? valorSuperior;
 
   const _LimitesSapDialog({
     required this.material,
+    required this.baseValue,
     this.valorInferior,
     this.valorSuperior,
   });
@@ -1575,6 +1585,7 @@ class _LimitesSapDialog extends StatefulWidget {
 class _LimitesSapDialogState extends State<_LimitesSapDialog> {
   late final TextEditingController _inferiorCtrl;
   late final TextEditingController _superiorCtrl;
+  _ModoLimite _modo = _ModoLimite.valor;
   String? _erro;
 
   @override
@@ -1605,9 +1616,65 @@ class _LimitesSapDialogState extends State<_LimitesSapDialog> {
     return double.tryParse(s.replaceAll(',', '.'));
   }
 
+  String _fmt(double v) => v.toStringAsFixed(2).replaceAll('.', ',');
+
+  void _alternarModo(_ModoLimite novoModo) {
+    if (novoModo == _modo) return;
+    setState(() {
+      // Converte o que já está digitado antes de trocar o modo, para não
+      // perder o valor informado.
+      final novoModoTemp = novoModo;
+      final velhoModo = _modo;
+      _modo = novoModoTemp;
+      String conv(String texto, bool inferior) {
+        final valor = _parse(texto);
+        if (valor == null) return '';
+        final base = widget.baseValue;
+        if (base == 0) return '';
+        if (velhoModo == _ModoLimite.valor && novoModoTemp == _ModoLimite.percentual) {
+          final pct = inferior ? (1 - valor / base) * 100 : (valor / base - 1) * 100;
+          return _fmt(pct);
+        }
+        if (velhoModo == _ModoLimite.percentual && novoModoTemp == _ModoLimite.valor) {
+          final r = inferior ? base * (1 - valor / 100) : base * (1 + valor / 100);
+          return _fmt(r);
+        }
+        return texto;
+      }
+      _inferiorCtrl.text = conv(_inferiorCtrl.text, true);
+      _superiorCtrl.text = conv(_superiorCtrl.text, false);
+    });
+  }
+
+  String? _equivalente(String texto, {required bool inferior}) {
+    final valor = _parse(texto);
+    if (valor == null || widget.baseValue == 0) return null;
+    if (_modo == _ModoLimite.valor) {
+      final pct = inferior
+          ? (1 - valor / widget.baseValue) * 100
+          : (valor / widget.baseValue - 1) * 100;
+      return '= ${_fmt(pct)}%';
+    }
+    final r = inferior
+        ? widget.baseValue * (1 - valor / 100)
+        : widget.baseValue * (1 + valor / 100);
+    return '= R\$ ${_fmt(r)}';
+  }
+
   void _confirmar() {
-    final inferior = _parse(_inferiorCtrl.text);
-    final superior = _parse(_superiorCtrl.text);
+    // Sempre resolve para R$ (é o que o SAP/VK11 recebe), convertendo se o
+    // modo atual for percentual.
+    double? resolver(String texto, bool inferior) {
+      final valor = _parse(texto);
+      if (valor == null) return null;
+      if (_modo == _ModoLimite.valor) return valor;
+      return inferior
+          ? widget.baseValue * (1 - valor / 100)
+          : widget.baseValue * (1 + valor / 100);
+    }
+
+    final inferior = resolver(_inferiorCtrl.text, true);
+    final superior = resolver(_superiorCtrl.text, false);
     // Os dois limites viram MXWRT/GKWRT no VK11 e o SAP rejeita a condição
     // quando só um deles está preenchido (mensagem VK023) — por isso não
     // deixamos confirmar com só um dos dois valores informado.
@@ -1620,8 +1687,45 @@ class _LimitesSapDialogState extends State<_LimitesSapDialog> {
     Navigator.of(context).pop(_LimitesSap(inferior: inferior, superior: superior));
   }
 
+  Widget _modoChip(String label, _ModoLimite valor) {
+    final sel = _modo == valor;
+    return Expanded(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(7),
+        onTap: () => _alternarModo(valor),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: sel ? _laranja : Colors.grey.shade50,
+            borderRadius: BorderRadius.circular(7),
+            border: Border.all(color: sel ? _laranja : Colors.grey.shade200),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: sel ? Colors.white : Colors.grey.shade700,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final labelInferior = _modo == _ModoLimite.valor
+        ? 'Valor inferior (MXWRT)'
+        : '% para baixo';
+    final labelSuperior = _modo == _ModoLimite.valor
+        ? 'Valor superior (GKWRT)'
+        : '% para cima';
+    final eqInferior = _equivalente(_inferiorCtrl.text, inferior: true);
+    final eqSuperior = _equivalente(_superiorCtrl.text, inferior: false);
+
     return AlertDialog(
       title: const Text('Limites SAP (VK11)', style: TextStyle(fontSize: 16)),
       content: SizedBox(
@@ -1635,25 +1739,42 @@ class _LimitesSapDialogState extends State<_LimitesSapDialog> {
               style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
               overflow: TextOverflow.ellipsis,
             ),
+            const SizedBox(height: 4),
+            Text(
+              'PPV CX base: R\$ ${_fmt(widget.baseValue)}',
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                _modoChip('R\$', _ModoLimite.valor),
+                const SizedBox(width: 8),
+                _modoChip('%', _ModoLimite.percentual),
+              ],
+            ),
             const SizedBox(height: 16),
             TextField(
               controller: _inferiorCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                labelText: 'Valor inferior (MXWRT)',
+              decoration: InputDecoration(
+                labelText: labelInferior,
                 hintText: 'Vazio = 0,00',
-                border: OutlineInputBorder(),
+                helperText: eqInferior,
+                border: const OutlineInputBorder(),
               ),
+              onChanged: (_) => setState(() {}),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _superiorCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                labelText: 'Valor superior (GKWRT)',
+              decoration: InputDecoration(
+                labelText: labelSuperior,
                 hintText: 'Vazio = 0,00',
-                border: OutlineInputBorder(),
+                helperText: eqSuperior,
+                border: const OutlineInputBorder(),
               ),
+              onChanged: (_) => setState(() {}),
             ),
             const SizedBox(height: 8),
             Text(

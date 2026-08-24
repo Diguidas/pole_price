@@ -47,11 +47,15 @@ class MaterialPreco {
   final String? kmein; // unidade de medida (ex: KG)
   final String? krech; // regra de cálculo (ex: C)
 
-  // Limites de preço da condição no SAP (VK11, tela de detalhe). Editáveis
-  // manualmente por material (botão "Limites SAP" na tela de Preços) —
-  // quando não informados, vão como 0,00 puro para o SAP, sem fallback.
+  // Limites de preço da condição no SAP (VK11, tela de detalhe). Podem vir
+  // de duas fontes: (1) o botão "Limites SAP" por linha, que seta o valor em
+  // R$ manualmente e trava o material (mxwrtGkwrtManual = true), ou (2) o
+  // botão "Limites SAP" geral no topo, que calcula a partir de uma % por
+  // agrupamento — só materiais não travados são recalculados por ele.
+  // Quando não informados, vão como 0,00 puro para o SAP, sem fallback.
   double? mxwrt; // valor inferior
   double? gkwrt; // valor superior
+  bool mxwrtGkwrtManual = false; // true = travado pelo dialog por linha
 
   // Status do preço na lista SAP: '' = normal, 'L' = bloqueado p/ liberação, 'X' = deletado
   String sapStatus;

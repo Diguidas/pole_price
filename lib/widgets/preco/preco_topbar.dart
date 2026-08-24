@@ -4,6 +4,7 @@ import 'package:pole_price/controllers/preco_controller.dart';
 import 'package:pole_price/screens/definir_aprovacoes_screen.dart';
 import 'package:pole_price/widgets/resumo_aprovacao_sheet.dart';
 import 'package:pole_price/widgets/app_shell.dart'; // AppShell, AppPage
+import 'package:pole_price/widgets/preco/limites_sap_agrupamento_dialog.dart';
 
 const _laranja = Color(0xFFFF6B00);
 
@@ -99,6 +100,11 @@ class PrecoTopbar extends StatelessWidget {
 
           // ── Botão Query unificado ───────────────────────────────────
           _QueryButton(controller: controller),
+
+          const SizedBox(width: 12),
+
+          // ── Botão Limites SAP por agrupamento ────────────────────────
+          LimitesSapAgrupamentoButton(controller: controller),
 
           const SizedBox(width: 12),
 
