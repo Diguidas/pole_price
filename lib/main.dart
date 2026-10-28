@@ -7,8 +7,8 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Supabase.initialize(
-    url: 'https://zvlogrxqzmzqamphjtfe.supabase.co',
-    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp2bG9ncnhxem16cWFtcGhqdGZlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5MjU3OTQsImV4cCI6MjA5NTUwMTc5NH0.Jkkt8-ibyYiz-l6RvayTq2-9x9FQPqFC2ZdBnFN5MsE',
+    url: 'https://jrumkdghuvuktjsdoknl.supabase.co',
+    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpydW1rZGdodXZ1a3Rqc2Rva25sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI2Nzg2MjksImV4cCI6MjEwODI1NDYyOX0.iY7Nb3UwoIFL2k52vvhlDJxyE9r73eHgkM5BOvUw-T4',
   );
 
   runApp(const SistemaPrecoApp());

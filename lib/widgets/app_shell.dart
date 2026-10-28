@@ -11,6 +11,7 @@ import 'package:pole_price/screens/rascunhos_screen.dart';
 import 'package:pole_price/screens/historico_screen.dart';
 import 'package:pole_price/screens/politicas_screen.dart';
 import 'package:pole_price/screens/relatorio_screen.dart';
+import 'package:pole_price/screens/relatorio_base_preco_screen.dart';
 import 'package:pole_price/screens/config_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pole_price/widgets/lista_picker.dart';
@@ -26,6 +27,7 @@ enum AppPage {
   historico,
   politicas,
   relatorio,
+  relatorioBasePreco,
   config;
 
   String get label => switch (this) {
@@ -37,6 +39,7 @@ enum AppPage {
     AppPage.historico => 'Histórico',
     AppPage.politicas => 'Políticas',
     AppPage.relatorio => 'Relatório',
+    AppPage.relatorioBasePreco => 'Base de Preço',
     AppPage.config => 'Configurações',
   };
 
@@ -49,6 +52,7 @@ enum AppPage {
     AppPage.historico => Icons.history_rounded,
     AppPage.politicas => Icons.policy_rounded,
     AppPage.relatorio => Icons.bar_chart_rounded,
+    AppPage.relatorioBasePreco => Icons.grid_on_rounded,
     AppPage.config => Icons.settings_rounded,
   };
 
@@ -61,6 +65,7 @@ enum AppPage {
     AppPage.historico => p.podeVerHistorico,
     AppPage.politicas => p.podeVerPoliticas,
     AppPage.relatorio => p.podeVerRelatorio,
+    AppPage.relatorioBasePreco => p.podeVerRelatorio,
     AppPage.config => p.podeVerConfig,
   };
 }
@@ -273,6 +278,7 @@ class _AppShellState extends State<AppShell> {
       AppPage.historico => const HistoricoScreen(),
       AppPage.politicas => const PoliticasScreen(),
       AppPage.relatorio => const RelatorioScreen(),
+      AppPage.relatorioBasePreco => const RelatorioBasePrecoScreen(),
       AppPage.config => const ConfigScreen(),
     };
   }
@@ -304,6 +310,7 @@ class _AppSidebarState extends State<_AppSidebar> {
     AppPage.historico,
     AppPage.politicas,
     AppPage.relatorio,
+    AppPage.relatorioBasePreco,
   ];
 
   @override
