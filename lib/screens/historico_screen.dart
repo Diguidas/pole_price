@@ -12,7 +12,7 @@ class HistoricoScreen extends StatefulWidget {
 
 class _HistoricoScreenState extends State<HistoricoScreen> {
   // Paleta de Cores Premium unificada do ecossistema
-  static const _laranja = Color(0xFFFF6B00);
+  static const _laranja = Color(0xFFE8793A);
   static const _slate900 = Color(0xFF0F172A);
   static const _slate600 = Color(0xFF475569);
   static const _slate400 = Color(0xFF94A3B8);
@@ -160,7 +160,7 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
     final createdAt = _fmtData(r['created_at']?.toString());
     final reviewedAt = _fmtData(r['reviewed_at']?.toString());
 
-    Navigator.of(context).push(
+    Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute(
         builder: (_) => HistoricoDraftDetailScreen(
           draftId: r['id'].toString(),

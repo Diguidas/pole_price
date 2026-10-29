@@ -132,7 +132,7 @@ class RelatorioScreen extends StatefulWidget {
 }
 
 class _RelatorioScreenState extends State<RelatorioScreen> {
-  static const _laranja = Color(0xFFFF6B00);
+  static const _laranja = Color(0xFFE8793A);
   static const _slate900 = Color(0xFF0F172A);
   static const _slate600 = Color(0xFF475569);
   static const _slate200 = Color(0xFFE2E8F0);
@@ -1271,7 +1271,7 @@ class _ColunaHistoricoSap extends StatefulWidget {
 }
 
 class _ColunaHistoricoSapState extends State<_ColunaHistoricoSap> {
-  static const _laranja = Color(0xFFFF6B00);
+  static const _laranja = Color(0xFFE8793A);
   static const _azul = Color(0xFF0EA5E9);
   static const _slate900 = Color(0xFF0F172A);
   static const _slate600 = Color(0xFF475569);
@@ -1726,7 +1726,7 @@ class _PainelDetalheHistorico extends StatelessWidget {
   final _MaterialHistorico? material;
   final _EntradaHistoricoSap? entrada;
 
-  static const _laranja = Color(0xFFFF6B00);
+  static const _laranja = Color(0xFFE8793A);
   static const _azul = Color(0xFF0EA5E9);
   static const _slate900 = Color(0xFF0F172A);
   static const _slate600 = Color(0xFF475569);
@@ -1983,7 +1983,7 @@ class _ColunaMateriais extends StatelessWidget {
   final ValueChanged<String> onBuscaChanged;
   final ValueChanged<_MaterialAgrupado> onSelecionado;
 
-  static const _laranja = Color(0xFFFF6B00);
+  static const _laranja = Color(0xFFE8793A);
   static const _slate900 = Color(0xFF0F172A);
   static const _slate600 = Color(0xFF475569);
   static const _slate200 = Color(0xFFE2E8F0);
@@ -2223,7 +2223,7 @@ class _ColunaHistorico extends StatelessWidget {
   final List<_PontoHistorico> historico;
   final bool loadingHistorico;
 
-  static const _laranja = Color(0xFFFF6B00);
+  static const _laranja = Color(0xFFE8793A);
   static const _slate900 = Color(0xFF0F172A);
   static const _slate600 = Color(0xFF475569);
   static const _slate200 = Color(0xFFE2E8F0);
@@ -2747,7 +2747,7 @@ class _GraficoVigencia extends CustomPainter {
   final List<_EntradaVigencia> vigencias;
   const _GraficoVigencia({required this.vigencias});
 
-  static const _laranja = Color(0xFFFF6B00);
+  static const _laranja = Color(0xFFE8793A);
   static const _verde = Color(0xFF10B981);
   static const _slate200 = Color(0xFFE2E8F0);
   static const _slate400 = Color(0xFF94A3B8);

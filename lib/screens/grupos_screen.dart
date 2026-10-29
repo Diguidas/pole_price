@@ -11,8 +11,8 @@ class GruposScreen extends StatefulWidget {
 }
 
 class _GruposScreenState extends State<GruposScreen> {
-  static const _laranja = Color(0xFFFF6B00);
-  static const _background = Color(0xFFF8F9FA);
+  static const _laranja = Color(0xFFE8793A);
+  static const _background = Color(0xFFF7F5F2);
 
   late final ProductGroupService _service;
 

@@ -11,7 +11,7 @@ class PoliticasScreen extends StatefulWidget {
 }
 
 class _PoliticasScreenState extends State<PoliticasScreen> {
-  static const _laranja      = Color(0xFFFF6B00);
+  static const _laranja      = Color(0xFFE8793A);
   static const _slate900     = Color(0xFF0F172A);
   static const _slate600     = Color(0xFF475569);
   static const _slate100     = Color(0xFFF1F5F9);

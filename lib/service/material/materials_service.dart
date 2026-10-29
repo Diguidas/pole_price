@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:excel/excel.dart';
 import 'package:flutter/foundation.dart';
 import 'package:pole_price/models/material/material_model.dart';
+import 'package:pole_price/service/supabase_paginacao.dart';
+import 'package:pole_price/utils/semana_custo.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class MaterialsService {
@@ -22,10 +24,21 @@ class MaterialsService {
     String? empresa,
     String? marca,
   }) async {
-    var query = supabase.from('materials').select().order('description');
-
-    final res = await query;
-    final rows = (res as List).cast<Map<String, dynamic>>();
+    // O PostgREST limita cada resposta a 1000 linhas (max-rows), então
+    // pagina até esgotar. Desempate por material_code mantém a paginação estável.
+    const pagina = 1000;
+    final rows = <Map<String, dynamic>>[];
+    for (var ini = 0;; ini += pagina) {
+      final res = await supabase
+          .from('materials')
+          .select()
+          .order('description')
+          .order('material_code')
+          .range(ini, ini + pagina - 1);
+      final lote = (res as List).cast<Map<String, dynamic>>();
+      rows.addAll(lote);
+      if (lote.length < pagina) break;
+    }
 
     final codigos = rows
         .map((r) => r['material_code']?.toString())
@@ -33,40 +46,11 @@ class MaterialsService {
         .toSet()
         .toList();
 
-    final custosRes = codigos.isEmpty
-        ? <dynamic>[]
-        : await supabase
-            .from('product_costs')
-            .select('product_code, cost_value, ded_pct, dv_pct, period')
-            .inFilter('product_code', codigos);
-
-    // 'period' é texto e pode conter formatos legados fora do padrão
-    // AAAAMM — só considera períodos de 6 dígitos ao escolher o mais recente.
-    final periodoRegex = RegExp(r'^\d{6}$');
-    final melhorPeriodoPorCodigo = <String, String>{};
-    for (final c in custosRes) {
-      final code = c['product_code']?.toString();
-      final periodo = c['period']?.toString();
-      if (code == null || periodo == null || !periodoRegex.hasMatch(periodo)) {
-        continue;
-      }
-      final atual = melhorPeriodoPorCodigo[code];
-      if (atual == null || periodo.compareTo(atual) > 0) {
-        melhorPeriodoPorCodigo[code] = periodo;
-      }
-    }
-
-    final cpvMap = <String, dynamic>{};
-    final dedMap = <String, dynamic>{};
-    final dvMap = <String, dynamic>{};
-    for (final c in custosRes) {
-      final code = c['product_code']?.toString();
-      final periodo = c['period']?.toString();
-      if (code == null || periodo != melhorPeriodoPorCodigo[code]) continue;
-      cpvMap[code] = c['cost_value'];
-      dedMap[code] = c['ded_pct'];
-      dvMap[code] = c['dv_pct'];
-    }
+    // Custo vigente: o da semana atual ou, na falta dele, o último registrado.
+    final custos = await custosVigentes(supabase, codigos);
+    final cpvMap = {for (final e in custos.entries) e.key: e.value.cpv};
+    final dedMap = {for (final e in custos.entries) e.key: e.value.dedPct};
+    final dvMap = {for (final e in custos.entries) e.key: e.value.dvPct};
 
     final lista = rows.map((j) {
       final code = j['material_code']?.toString();
@@ -256,7 +240,8 @@ class MaterialsService {
     for (final m in materiais) {
       final c = custoPorCodigo[m.materialCode];
       sheet.appendRow([
-        TextCellValue(c?['period']?.toString() ?? ''),
+        // Sem custo anterior, já sugere a semana atual para preencher.
+        TextCellValue(c?['period']?.toString() ?? SemanaCusto.atual()),
         TextCellValue(m.materialCode),
         TextCellValue(m.description),
         TextCellValue(c?['cost_value']?.toString() ?? ''),
@@ -384,6 +369,7 @@ class MaterialsService {
 
   /// Lê a planilha de import (Periodo, Segmento, Cod, Material, Valor,
   /// dedução, Despesa) e faz upsert em `product_costs` por (product_code, period).
+  /// O período é semanal, no formato AAAASS (ex.: 202643).
   /// Importa todas as linhas independente do segmento (Revenda/Industrializados) —
   /// cada material só aparece em um segmento na planilha, então não há conflito
   /// real; se por algum motivo a mesma chave (material, período) se repetir, a
@@ -448,10 +434,19 @@ class MaterialsService {
         continue;
       }
 
-      final periodo = cellStr(row, idxPeriodo);
+      // Custos são semanais: período no formato AAAASS (ano + semana ISO,
+      // ex.: 202643 = semana 43 de 2026).
+      final periodo = SemanaCusto.normalizar(cellStr(row, idxPeriodo));
+      if (periodo == null) {
+        erros.add(
+          'Linha $linhaNum: período "${cellStr(row, idxPeriodo)}" inválido — '
+          'use AAAASS (ex.: ${SemanaCusto.atual()}) — ignorado.',
+        );
+        continue;
+      }
       final cpv = cellNum(row, idxValor);
-      if (periodo.isEmpty || cpv == null) {
-        erros.add('Linha $linhaNum: período ou CPV inválido — ignorado.');
+      if (cpv == null) {
+        erros.add('Linha $linhaNum: CPV inválido — ignorado.');
         continue;
       }
 

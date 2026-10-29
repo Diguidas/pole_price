@@ -18,9 +18,9 @@ import 'dart:html' as html;
 
 // ── Paleta ──────────────────────────────────────────────────────────────────
 class _C {
-  static const bg           = Color(0xFFF5F6F8);
+  static const bg           = Color(0xFFF7F5F2);
   static const white        = Color(0xFFFFFFFF);
-  static const laranja      = Color(0xFFFF6B00);
+  static const laranja      = Color(0xFFE8793A);
   static const laranjaLight = Color(0xFFFFF0E6);
   static const azulEscuro   = Color(0xFF0D1F35);
   static const verde        = Color(0xFF0A7C4E);
@@ -106,8 +106,7 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
       final lista = await _service.listar();
       if (!mounted) return;
       setState(() {
-        // filtra fora materiais sem empresa
-        _materiais = lista.where((m) => m.empresa != null && m.empresa!.isNotEmpty).toList();
+        _materiais = lista;
         _loading = false;
       });
     } catch (e) {
@@ -120,12 +119,12 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
   // ── Busca global (encontra o material em qualquer lugar da hierarquia) ───
 
   void _selecionarMaterialGlobal(MaterialSap m) {
-    final emp = m.empresa ?? '(sem empresa)';
-    final mar = m.marca ?? '(sem marca)';
+    final emp = (m.empresa?.isNotEmpty ?? false) ? m.empresa! : '(sem empresa)';
+    final mar = (m.marca?.isNotEmpty ?? false) ? m.marca! : '(sem marca)';
     final gra = m.gramatura?.toString() ?? '(sem gramatura)';
-    final cat = m.categoria ?? '(sem categoria)';
-    final lin = m.linha ?? '(sem linha)';
-    final agr = m.agrupamentoPreco ?? '(sem agrupamento)';
+    final cat = (m.categoria?.isNotEmpty ?? false) ? m.categoria! : '(sem categoria)';
+    final lin = (m.linha?.isNotEmpty ?? false) ? m.linha! : '(sem linha)';
+    final agr = (m.agrupamentoPreco?.isNotEmpty ?? false) ? m.agrupamentoPreco! : '(sem agrupamento)';
 
     setState(() {
       _empresaSelecionada = emp;
@@ -145,12 +144,15 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
     if (_agrupamentoSelecionado == null) return [];
 
     var lista = _materiais.where((m) {
-      if (m.empresa != _empresaSelecionada) return false;
-      if (_marcaSelecionada != null && m.marca != _marcaSelecionada) return false;
-      if (_gramaturaSelecionada != null && (m.gramatura?.toString()) != _gramaturaSelecionada) return false;
-      if (_categoriaSelecionada != null && m.categoria != _categoriaSelecionada) return false;
-      if (_linhaSelecionada != null && m.linha != _linhaSelecionada) return false;
-      if (m.agrupamentoPreco != _agrupamentoSelecionado) return false;
+      // Mesmos rótulos da árvore: nulo/vazio vira "(sem …)".
+      String rot(String? v, String semLabel) =>
+          (v == null || v.isEmpty) ? semLabel : v;
+      if (rot(m.empresa, '(sem empresa)') != _empresaSelecionada) return false;
+      if (_marcaSelecionada != null && rot(m.marca, '(sem marca)') != _marcaSelecionada) return false;
+      if (_gramaturaSelecionada != null && (m.gramatura?.toString() ?? '(sem gramatura)') != _gramaturaSelecionada) return false;
+      if (_categoriaSelecionada != null && rot(m.categoria, '(sem categoria)') != _categoriaSelecionada) return false;
+      if (_linhaSelecionada != null && rot(m.linha, '(sem linha)') != _linhaSelecionada) return false;
+      if (rot(m.agrupamentoPreco, '(sem agrupamento)') != _agrupamentoSelecionado) return false;
       return true;
     }).toList();
 
@@ -172,12 +174,12 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
     final Map<String, Map<String, Map<String, Map<String, Map<String, Set<String>>>>>> tree = {};
 
     for (final m in _materiais) {
-      final emp = m.empresa ?? '(sem empresa)';
-      final mar = m.marca ?? '(sem marca)';
+      final emp = (m.empresa?.isNotEmpty ?? false) ? m.empresa! : '(sem empresa)';
+      final mar = (m.marca?.isNotEmpty ?? false) ? m.marca! : '(sem marca)';
       final gra = m.gramatura?.toString() ?? '(sem gramatura)';
-      final cat = m.categoria ?? '(sem categoria)';
-      final lin = m.linha ?? '(sem linha)';
-      final agr = m.agrupamentoPreco ?? '(sem agrupamento)';
+      final cat = (m.categoria?.isNotEmpty ?? false) ? m.categoria! : '(sem categoria)';
+      final lin = (m.linha?.isNotEmpty ?? false) ? m.linha! : '(sem linha)';
+      final agr = (m.agrupamentoPreco?.isNotEmpty ?? false) ? m.agrupamentoPreco! : '(sem agrupamento)';
 
       tree
         .putIfAbsent(emp, () => {})

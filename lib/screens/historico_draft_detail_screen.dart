@@ -42,7 +42,7 @@ class HistoricoDraftDetailScreen extends StatefulWidget {
 
 class _HistoricoDraftDetailScreenState
     extends State<HistoricoDraftDetailScreen> {
-  static const _laranja = Color(0xFFFF6B00);
+  static const _laranja = Color(0xFFE8793A);
   static const _slate900 = Color(0xFF0F172A);
   static const _slate600 = Color(0xFF475569);
   static const _slate400 = Color(0xFF94A3B8);
@@ -670,7 +670,7 @@ class _KpisSummary {
 }
 
 class _KpiRow extends StatelessWidget {
-  static const _laranja = Color(0xFFFF6B00);
+  static const _laranja = Color(0xFFE8793A);
   static const _slate600 = Color(0xFF475569);
   static const _slate200 = Color(0xFFE2E8F0);
   final _KpisSummary kpis;
@@ -785,7 +785,7 @@ class _KpiRow extends StatelessWidget {
 }
 
 class _RegrasBox extends StatelessWidget {
-  static const _laranja = Color(0xFFFF6B00);
+  static const _laranja = Color(0xFFE8793A);
   static const _slate900 = Color(0xFF0F172A);
   static const _slate600 = Color(0xFF475569);
   static const _slate200 = Color(0xFFE2E8F0);
@@ -853,7 +853,7 @@ class _RegrasBox extends StatelessWidget {
 }
 
 class _FiltrosBarra extends StatelessWidget {
-  static const _laranja = Color(0xFFFF6B00);
+  static const _laranja = Color(0xFFE8793A);
   static const _slate600 = Color(0xFF475569);
   static const _slate400 = Color(0xFF94A3B8);
   static const _slate200 = Color(0xFFE2E8F0);
@@ -1072,7 +1072,7 @@ class _TabelaCabecalho extends StatelessWidget {
 }
 
 class _GrupoHeader extends StatelessWidget {
-  static const _laranja = Color(0xFFFF6B00);
+  static const _laranja = Color(0xFFE8793A);
   static const _slate900 = Color(0xFF0F172A);
   static const _slate600 = Color(0xFF475569);
   static const _slate200 = Color(0xFFE2E8F0);
@@ -1182,7 +1182,7 @@ class _LinhaItem extends StatefulWidget {
 }
 
 class _LinhaItemState extends State<_LinhaItem> {
-  static const _laranja = Color(0xFFFF6B00);
+  static const _laranja = Color(0xFFE8793A);
   static const _slate900 = Color(0xFF0F172A);
   static const _slate600 = Color(0xFF475569);
   static const _slate100 = Color(0xFFF1F5F9);

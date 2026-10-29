@@ -5,6 +5,7 @@ import 'package:pole_price/models/regra_ajuste.dart';
 import 'package:pole_price/service/draft_pricing_service.dart';
 import 'package:pole_price/service/sap_sync_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:pole_price/service/supabase_paginacao.dart';
 
 class PriceService {
   final SupabaseClient supabase;
@@ -31,27 +32,21 @@ class PriceService {
         .eq('id', listId)
         .single();
 
-    // Não ordena por 'period' direto: a coluna é texto e convive com formatos
-    // legados ('MANUAL', '2025.05') que "vencem" um período real (ex: '202607')
-    // em ordenação alfabética. Só considera períodos no formato AAAAMM (6
-    // dígitos) e escolhe o maior numericamente.
-    final periodFuture = supabase.from('product_costs').select('period');
-
     // ← Adicionado: peso_unidade, peso_caixa, unidade_venda
-    final matsFuture = supabase
+    final matsFuture = paginar((a, b) => supabase
         .from('materials')
         .select('product_id, description, price, peso_unidade, peso_caixa, unidade_venda')
-        .eq('price_list_id', listId);
+        .eq('price_list_id', listId)
+        .order('product_id')
+        .range(a, b));
 
     final round1 = await Future.wait<dynamic>([
       listFuture,
-      periodFuture,
       matsFuture,
     ]);
 
     final listRes = round1[0] as Map<String, dynamic>;
-    final periodRes = round1[1] as List;
-    final matsRes = round1[2] as List;
+    final matsRes = round1[1] as List;
 
     final margemFlat = listRes['margem_flat'] != null
         ? double.tryParse(listRes['margem_flat'].toString())
@@ -60,12 +55,6 @@ class PriceService {
         ? double.tryParse(listRes['margem_oferta'].toString())
         : null;
 
-    final periodoRegex = RegExp(r'^\d{6}$');
-    final latestPeriod = periodRes
-        .map((r) => r['period']?.toString())
-        .whereType<String>()
-        .where((p) => periodoRegex.hasMatch(p))
-        .fold<String?>(null, (max, p) => (max == null || p.compareTo(max) > 0) ? p : max);
 
     if (matsRes.isEmpty) return [];
 
@@ -74,22 +63,20 @@ class PriceService {
         .whereType<String>()
         .toList();
 
-    // classification não é mais usada como filtro: desde que o import de
-    // custos passou a vir só da planilha (CPV/Ded%/DV% por período), toda
-    // linha de product_costs do período mais recente é válida.
-    final Future<dynamic> cpvFuture = latestPeriod != null && codes.isNotEmpty
-        ? supabase
-              .from('product_costs')
-              .select('product_code, cost_value, ded_pct, dv_pct')
-              .eq('period', latestPeriod)
-              .inFilter('product_code', codes)
-        : Future<dynamic>.value(<dynamic>[]);
+    // Custos são semanais (período AAAASS): cada produto usa o custo da
+    // semana atual ou, na falta dele, o último registrado.
+    final Future<dynamic> cpvFuture = custosVigentes(supabase, codes);
 
     final Future<dynamic> clusterFuture = codes.isNotEmpty
-        ? supabase
-              .from('products')
-              .select('code, pricing_cluster_id')
-              .inFilter('code', codes)
+        ? emBlocos(
+            codes,
+            (parte) => paginar((a, b) => supabase
+                .from('products')
+                .select('code, pricing_cluster_id')
+                .inFilter('code', parte)
+                .order('code')
+                .range(a, b)),
+          )
         : Future<dynamic>.value(<dynamic>[]);
 
     // Vínculo de preço pai/filho + agrupamento — atributo do material (tabela
@@ -98,10 +85,15 @@ class PriceService {
     // material_code — a tabela materials não tem coluna product_id (só
     // material_code, usada em sap_sync_service e draft_pricing_service).
     final Future<dynamic> vinculoFuture = codes.isNotEmpty
-        ? supabase
-              .from('materials')
-              .select('material_code, agrupamento_preco, material_pai_code, excecao_preco_pct')
-              .inFilter('material_code', codes)
+        ? emBlocos(
+            codes,
+            (parte) => paginar((a, b) => supabase
+                .from('materials')
+                .select('material_code, agrupamento_preco, material_pai_code, excecao_preco_pct')
+                .inFilter('material_code', parte)
+                .order('material_code')
+                .range(a, b)),
+          )
         : Future<dynamic>.value(<dynamic>[]);
 
     final round2 = await Future.wait<dynamic>([
@@ -110,28 +102,17 @@ class PriceService {
       vinculoFuture,
     ]);
 
-    final cpvRes = round2[0] as List;
+    final custosPorCodigo = round2[0] as Map<String, CustoVigente>;
     final prodRes = round2[1] as List;
     final vinculoRes = round2[2] as List;
 
     final Map<String, double> cpvMap = {};
     final Map<String, double> dedMap = {};
     final Map<String, double> dvMap = {};
-    for (final row in cpvRes) {
-      final code = row['product_code']?.toString();
-      if (code == null) continue;
-      final cost = row['cost_value'] != null
-          ? double.tryParse(row['cost_value'].toString())
-          : null;
-      if (cost != null) cpvMap[code] = cost;
-      final ded = row['ded_pct'] != null
-          ? double.tryParse(row['ded_pct'].toString())
-          : null;
-      if (ded != null) dedMap[code] = ded;
-      final dv = row['dv_pct'] != null
-          ? double.tryParse(row['dv_pct'].toString())
-          : null;
-      if (dv != null) dvMap[code] = dv;
+    for (final e in custosPorCodigo.entries) {
+      if (e.value.cpv != null) cpvMap[e.key] = e.value.cpv!;
+      if (e.value.dedPct != null) dedMap[e.key] = e.value.dedPct!;
+      if (e.value.dvPct != null) dvMap[e.key] = e.value.dvPct!;
     }
 
     final Map<String, String> clusterMap = {};
@@ -200,11 +181,16 @@ class PriceService {
 
     final codigosAlterados = alterados.map((m) => m.codigo).toList();
 
-    final rows = await supabase
-        .from('materials')
-        .select('id, product_id')
-        .eq('price_list_id', listId)
-        .inFilter('product_id', codigosAlterados);
+    final rows = await emBlocos(
+      codigosAlterados,
+      (parte) => paginar((a, b) => supabase
+          .from('materials')
+          .select('id, product_id')
+          .eq('price_list_id', listId)
+          .inFilter('product_id', parte)
+          .order('id')
+          .range(a, b)),
+    );
 
     final idPorProduto = <String, String>{};
     for (final row in rows as List) {
@@ -286,6 +272,17 @@ class PriceService {
         supabase.from('price_draft_targets').delete().eq('draft_id', draftId),
         supabase.from('price_draft_exceptions').delete().eq('draft_id', draftId),
       ]);
+      // Vigência/status por lista voltam a ser recriados ao abrir na Aprovação.
+      // Ignora se a migração (price_draft_lists) ainda não foi aplicada.
+      try {
+        await supabase.from('price_draft_lists').delete().eq('draft_id', draftId);
+      } catch (_) {}
+      try {
+        await supabase
+            .from('price_draft_item_exclusions')
+            .delete()
+            .eq('draft_id', draftId);
+      } catch (_) {}
 
       resolvedId = draftId;
     } else {
@@ -376,11 +373,42 @@ class PriceService {
       await Future.wait<dynamic>(insertFutures);
     }
 
+    // Materiais escolhidos para NÃO ir a certas listas filhas (só as listas
+    // que continuam como destino do rascunho).
+    final exclusaoRows = <Map<String, dynamic>>[
+      for (final m in materiais.where((m) => !m.removido))
+        for (final lista in m.listasExcluidas)
+          if (targets.contains(lista))
+            {
+              'draft_id': resolvedId,
+              'pltyp': lista,
+              'product_id': m.codigo.trim(),
+            },
+    ];
+    if (exclusaoRows.isNotEmpty) {
+      try {
+        await supabase.from('price_draft_item_exclusions').insert(exclusaoRows);
+      } on PostgrestException catch (e) {
+        if (e.code == '42P01' ||
+            e.code == 'PGRST205' ||
+            e.message.contains('price_draft_item_exclusions')) {
+          throw Exception(
+            'Para escolher quais listas recebem cada material, aplique a '
+            'migração supabase_migration_price_draft_item_exclusions.sql no '
+            'Supabase e salve de novo.',
+          );
+        }
+        rethrow;
+      }
+    }
+
     return resolvedId;
   }
 
-  Future<int> approveDraft(String draftId) async {
-    return draftPricing.applyDraft(draftId);
+  /// Publica o rascunho no SAP. [pltyps] = só essas listas (as demais ficam
+  /// pendentes de aprovação); null = todas as pendentes.
+  Future<int> approveDraft(String draftId, {List<String>? pltyps}) async {
+    return draftPricing.applyDraft(draftId, pltyps: pltyps);
   }
 
   Future<int> reprocessarFalhas(String draftId) async {

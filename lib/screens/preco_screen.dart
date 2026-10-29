@@ -22,6 +22,7 @@ class _PrecoScreenState extends State<PrecoScreen> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       controller.iniciarNovaSessao();
+      controller.carregarStatusCustos();
       if (widget.draftId != null) {
         controller.carregarRascunho(widget.draftId!); // ← novo método
       } else {
@@ -46,10 +47,12 @@ class _PrecoScreenState extends State<PrecoScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F6F8),
+      backgroundColor: const Color(0xFFF7F5F2),
       body: Column(
         children: [
           PrecoTopbar(controller: controller),
+          if (controller.alertaCustosAtrasados != null)
+            _AlertaCustos(mensagem: controller.alertaCustosAtrasados!),
           Expanded(
             child: controller.loading
                 ? const Center(child: CircularProgressIndicator())
@@ -62,6 +65,37 @@ class _PrecoScreenState extends State<PrecoScreen> {
                     padding: const EdgeInsets.all(20),
                     child: PainelEsquerdo(controller: controller),
                   ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AlertaCustos extends StatelessWidget {
+  final String mensagem;
+  const _AlertaCustos({required this.mensagem});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      color: const Color(0xFFFFF4E5),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      child: Row(
+        children: [
+          const Icon(Icons.warning_amber_rounded,
+              size: 20, color: Color(0xFFB45309)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              mensagem,
+              style: const TextStyle(
+                fontSize: 13,
+                color: Color(0xFF7A3E00),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
           ),
         ],
       ),

@@ -14,7 +14,7 @@ class ConfigScreen extends StatefulWidget {
 
 class _ConfigScreenState extends State<ConfigScreen> {
   // Paleta de Cores Premium unificada do ecossistema
-  static const _laranja = Color(0xFFFF6B00);
+  static const _laranja = Color(0xFFE8793A);
   static const _slate900 = Color(0xFF0F172A);
   static const _slate600 = Color(0xFF475569);
   static const _slate400 = Color(0xFF94A3B8);
@@ -623,7 +623,7 @@ class _DialogUsuario extends StatefulWidget {
 }
 
 class _DialogUsuarioState extends State<_DialogUsuario> {
-  static const _laranja = Color(0xFFFF6B00);
+  static const _laranja = Color(0xFFE8793A);
   static const _slate900 = Color(0xFF0F172A);
   static const _slate600 = Color(0xFF475569);
   static const _slate400 = Color(0xFF94A3B8);

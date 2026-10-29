@@ -1,10 +1,7 @@
 // login_page.dart
 import 'package:flutter/material.dart';
-import 'package:pole_price/widgets/app_shell.dart';
-import 'package:pole_price/widgets/auth_guard.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:pole_price/screens/home_screen.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -14,7 +11,7 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  static const Color primaryOrange = Color(0xFFFF6B00);
+  static const Color primaryOrange = Color(0xFFE8793A);
   static const Color textDark = Color(0xFF1A1A1A);
   static const Color textGray = Color(0xFF666666);
 
@@ -24,17 +21,8 @@ class _LoginPageState extends State<LoginPage> {
   @override
   void initState() {
     super.initState();
-    // Escuta mudanças de sessão: quando o OAuth redirecionar de volta,
-    // o Supabase atualiza a sessão e navegamos para a Home automaticamente.
-    Supabase.instance.client.auth.onAuthStateChange.listen((data) {
-      if (!mounted) return;
-      if (data.session != null) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const AuthGuard()),
-        );
-      }
-    });
+    // Quando o OAuth redireciona de volta, o Supabase atualiza a sessão e o
+    // router (lib/router.dart) leva o usuário ao destino automaticamente.
   }
 
   Future<void> _entrarComMicrosoft() async {

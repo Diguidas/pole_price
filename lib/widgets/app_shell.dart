@@ -1,18 +1,10 @@
 // lib/widgets/app_shell.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
+import 'package:pole_price/screens/precos_rota.dart';
 import 'package:pole_price/controllers/permissao_controller.dart';
 import 'package:pole_price/controllers/preco_controller.dart';
-import 'package:pole_price/screens/home_screen.dart';
-import 'package:pole_price/screens/material/materials_screen.dart';
-import 'package:pole_price/screens/preco_screen.dart';
-import 'package:pole_price/screens/definir_aprovacoes_screen.dart';
-import 'package:pole_price/screens/rascunhos_screen.dart';
-import 'package:pole_price/screens/historico_screen.dart';
-import 'package:pole_price/screens/politicas_screen.dart';
-import 'package:pole_price/screens/relatorio_screen.dart';
-import 'package:pole_price/screens/relatorio_base_preco_screen.dart';
-import 'package:pole_price/screens/config_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pole_price/widgets/lista_picker.dart';
 import 'package:pole_price/widgets/grupo_picker.dart';
@@ -29,6 +21,28 @@ enum AppPage {
   relatorio,
   relatorioBasePreco,
   config;
+
+  /// Caminho da rota desta página (ver lib/router.dart).
+  String get path => switch (this) {
+    AppPage.home => '/',
+    AppPage.precos => '/precos',
+    AppPage.grupos => '/materiais',
+    AppPage.rascunhos => '/rascunhos',
+    AppPage.aprovacoes => '/aprovacoes',
+    AppPage.historico => '/historico',
+    AppPage.politicas => '/politicas',
+    AppPage.relatorio => '/relatorio',
+    AppPage.relatorioBasePreco => '/base-preco',
+    AppPage.config => '/config',
+  };
+
+  /// Página correspondente ao caminho atual da URL (Home se não reconhecer).
+  static AppPage fromLocation(String location) {
+    for (final p in AppPage.values) {
+      if (p != AppPage.home && location == p.path) return p;
+    }
+    return AppPage.home;
+  }
 
   String get label => switch (this) {
     AppPage.home => 'Home',
@@ -79,8 +93,13 @@ class _AppShellScope extends InheritedWidget {
 }
 
 class AppShell extends StatefulWidget {
-  final AppPage initialPage;
-  const AppShell({super.key, this.initialPage = AppPage.home});
+  /// Conteúdo da rota atual (entregue pelo ShellRoute do go_router).
+  final Widget child;
+
+  /// Caminho atual da URL (ex.: `/materiais`) — define o item ativo do menu.
+  final String location;
+
+  const AppShell({super.key, required this.child, required this.location});
 
   static _AppShellState of(BuildContext context) {
     final scope = context.dependOnInheritedWidgetOfExactType<_AppShellScope>();
@@ -93,22 +112,13 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> {
-  String? _draftIdInicial;
-  late AppPage _paginaAtiva;
+  AppPage get _paginaAtiva => AppPage.fromLocation(widget.location);
 
-  // Parâmetros da PrecoScreen — definidos após o diálogo de modo
-  _PrecoParams? _precoParams;
-
-  @override
-  void initState() {
-    super.initState();
-    _paginaAtiva = widget.initialPage;
-  }
-
+  /// Navega para [page] (opcionalmente com um rascunho: `?draft=<id>`).
   void goTo(AppPage page, {String? draftId}) {
     if (page == AppPage.precos) {
       if (draftId != null) {
-        _goToPrecosComRascunho(draftId); // ← novo caminho
+        context.go('/precos?draft=${Uri.encodeQueryComponent(draftId)}');
       } else {
         goToPrecos();
       }
@@ -121,133 +131,63 @@ class _AppShellState extends State<AppShell> {
       if (!perm.podeAprovar) {
         // Sem permissão de aprovação: limpa sessão e vai para rascunhos (se puder) ou home
         PrecoController.instance.iniciarNovaSessao();
-        setState(() {
-          _paginaAtiva = perm.podeVerRascunhos
-              ? AppPage.rascunhos
-              : AppPage.home;
-          _draftIdInicial = null;
-          _precoParams = null;
-        });
+        context.go(
+          perm.podeVerRascunhos ? AppPage.rascunhos.path : AppPage.home.path,
+        );
         return;
       }
     }
     if (_paginaAtiva == page && draftId == null) return;
-    setState(() {
-      _paginaAtiva = page;
-      _draftIdInicial = draftId;
-    });
+    context.go(
+      draftId != null
+          ? '${page.path}?draft=${Uri.encodeQueryComponent(draftId)}'
+          : page.path,
+    );
   }
 
-  Future<void> _goToPrecosComRascunho(String draftId) async {
-    final ctrl = PrecoController.instance;
-
-    // Busca cabeçalho do draft (sem 'modo' — não existe nessa tabela)
-    final draft = await Supabase.instance.client
-        .from('price_drafts')
-        .select('master_list_id') // só isso
-        .eq('id', draftId)
-        .single();
-
-    // Busca modo e kdgrp do primeiro item
-    final primeiroItem = await Supabase.instance.client
-        .from('price_draft_items')
-        .select('modo, kdgrp')
-        .eq('draft_id', draftId)
-        .limit(1)
-        .maybeSingle();
-
-    final pltyp = draft['master_list_id']?.toString();
-    final modoStr = primeiroItem?['modo']?.toString();
-    final kdgrp = primeiroItem?['kdgrp']?.toString();
-
-    await ctrl.init();
-
-    ctrl.modo = modoStr == 'grupo' ? SapModo.grupo : SapModo.lista;
-    ctrl.pltyp = pltyp;
-    ctrl.kdgrp = kdgrp;
-    ctrl.selecionada = ctrl.listas.where((l) => l.id == pltyp).firstOrNull;
-    ctrl.materiais = [];
-    ctrl.filtrados = [];
-    ctrl.erro = null;
-
-    if (!mounted) return;
-
-    setState(() {
-      _draftIdInicial = draftId;
-      _precoParams = _PrecoParams(
-        modo: modoStr == 'grupo' ? SapModo.grupo : SapModo.lista,
-        pltyp: pltyp ?? '',
-        kdgrp: kdgrp,
-        datab: null,
-        datbi: null,
-        databOp: null,
-        datbiOp: null,
-      );
-      _paginaAtiva = AppPage.precos;
-    });
-  }
-
-  Future<void> goToPrecos() async {
+  /// Abre o diálogo de lista/grupo e, se confirmado, navega para
+  /// `/precos?...` com os parâmetros na URL. Retorna `true` se navegou.
+  Future<bool> goToPrecos() async {
     // Garante que controller.listas está populado antes de abrir o diálogo
-    final ctrl = PrecoController.instance;
-    await ctrl
+    await PrecoController.instance
         .init(); // já tem guard "if (listas.isNotEmpty) return", seguro chamar
+    if (!mounted) return false;
 
-    final params = await showDialog<_PrecoParams>(
+    final params = await showDialog<PrecoParams>(
       context: context,
       barrierDismissible: true,
       builder: (_) => const _ModoPrecoDialog(),
     );
-    if (params == null || !mounted) return;
+    if (params == null || !mounted) return false;
 
-    ctrl.pltyp = null;
-    ctrl.kdgrp = null;
-    ctrl.datab = null;
-    ctrl.datbi = null;
-    ctrl.databOp = null;
-    ctrl.datbiOp = null;
-    ctrl.modo = SapModo.lista;
-
-    ctrl.modo = params.modo;
-    ctrl.pltyp = params.pltyp;
-    ctrl.kdgrp = params.kdgrp;
-    ctrl.datab = params.datab;
-    ctrl.datbi = params.datbi;
-    ctrl.databOp = params.databOp;
-    ctrl.datbiOp = params.datbiOp;
-    // Por padrão, uma consulta nova já entra excluindo materiais
-    // inativos e bloqueados ('E' = excluir; usuário ajusta manualmente
-    // na tela se precisar incluir).
-    ctrl.kznepFilter = 'E';
-    ctrl.loevmFilter = 'E';
-
-    // ← ISSO resolve o botão esmaecido e o seletor vazio
-    ctrl.selecionada = ctrl.listas
-        .where((l) => l.id == params.pltyp)
-        .firstOrNull;
-
-    ctrl.materiais = [];
-    ctrl.filtrados = [];
-    ctrl.erro = null;
-
-    setState(() {
-      _precoParams = params;
-      _paginaAtiva = AppPage.precos;
-    });
+    context.go(params.location);
+    return true;
   }
 
   @override
   Widget build(BuildContext context) {
+    final pagina = _paginaAtiva;
+    final podeVer = pagina.podeVer(PermissaoController.instance);
+
+    // Rota sem permissão (ex.: URL digitada): volta ao Home.
+    if (!podeVer) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) context.go(AppPage.home.path);
+      });
+    }
+
     return _AppShellScope(
       state: this,
       child: Scaffold(
-        backgroundColor: const Color(0xFFF4F6F8),
+        backgroundColor: const Color(0xFFF7F5F2),
         body: Stack(
           children: [
             Row(
               children: [
-                _AppSidebar(paginaAtiva: _paginaAtiva, onSelect: goTo),
-                Expanded(child: _buildPage(_paginaAtiva)),
+                _AppSidebar(paginaAtiva: pagina, onSelect: goTo),
+                Expanded(
+                  child: podeVer ? widget.child : const SizedBox.shrink(),
+                ),
               ],
             ),
             const BackgroundTaskOverlay(),
@@ -255,32 +195,6 @@ class _AppShellState extends State<AppShell> {
         ),
       ),
     );
-  }
-
-  Widget _buildPage(AppPage page) {
-    return switch (page) {
-      AppPage.home => const HomeScreen(),
-      AppPage.precos =>
-        _precoParams != null
-            ? PrecoScreen(
-                key: ValueKey(
-                  _draftIdInicial ??
-                      '${_precoParams!.pltyp}_'
-                          '${_precoParams!.kdgrp}_'
-                          '${_precoParams!.datab?.millisecondsSinceEpoch}',
-                ),
-                draftId: _draftIdInicial, // ← passar aqui
-              )
-            : const SizedBox.shrink(),
-      AppPage.grupos => const MaterialsScreen(),
-      AppPage.rascunhos => const RascunhosScreen(),
-      AppPage.aprovacoes => AprovacoesScreen(draftIdInicial: _draftIdInicial),
-      AppPage.historico => const HistoricoScreen(),
-      AppPage.politicas => const PoliticasScreen(),
-      AppPage.relatorio => const RelatorioScreen(),
-      AppPage.relatorioBasePreco => const RelatorioBasePrecoScreen(),
-      AppPage.config => const ConfigScreen(),
-    };
   }
 }
 
@@ -296,10 +210,15 @@ class _AppSidebar extends StatefulWidget {
 class _AppSidebarState extends State<_AppSidebar> {
   bool _recolhida = false;
 
-  static const _laranjaFundo = Color(0xFFFF6B00);
-  static const _brancoPuro = Colors.white;
-  static final _brancoOpaco = Colors.white.withOpacity(0.70);
-  static final _brancoHover = Colors.white.withOpacity(0.08);
+  // Sidebar clara (confortável para uso prolongado): fundo off-white, item
+  // ativo em laranja claro.
+  static const _fundo = Color(0xFFFBF9F7);
+  static const _borda = Color(0xFFEDE6DF);
+  static const _texto = Color(0xFF6B635C); // itens inativos
+  static const _textoAtivo = Color(0xFFC25A22); // item ativo
+  static const _ativoFundo = Color(0xFFFFEBDC); // laranja claro (selecionado)
+  static const _hover = Color(0xFFF3EDE7);
+  static const _textoSutil = Color(0xFFA39A92);
 
   static const _mainPages = [
     AppPage.home,
@@ -327,12 +246,13 @@ class _AppSidebarState extends State<_AppSidebar> {
       curve: Curves.easeInOut,
       width: largura,
       decoration: const BoxDecoration(
-        color: _laranjaFundo,
+        color: _fundo,
+        border: Border(right: BorderSide(color: _borda)),
         boxShadow: [
           BoxShadow(
-            color: Color(0x1A000000),
-            blurRadius: 16,
-            offset: Offset(4, 0),
+            color: Color(0x0D000000),
+            blurRadius: 12,
+            offset: Offset(2, 0),
           ),
         ],
       ),
@@ -354,7 +274,7 @@ class _AppSidebarState extends State<_AppSidebar> {
                   child: _recolhida
                       ? Center(
                           child: IconButton(
-                            icon: const Icon(Icons.menu, color: _brancoPuro),
+                            icon: const Icon(Icons.menu, color: _texto),
                             onPressed: () => setState(() => _recolhida = false),
                             tooltip: 'Expandir menu',
                           ),
@@ -364,8 +284,9 @@ class _AppSidebarState extends State<_AppSidebar> {
                             const SizedBox(width: 8),
                             Expanded(
                               child: Image.asset(
-                                'assets/logo_branca.png',
-                                height: 200,
+                                'assets/logo.png',
+                                height: 400,
+                                fit: BoxFit.contain,
                                 alignment: Alignment.centerLeft,
 
                                 errorBuilder: (_, __, ___) => const Text(
@@ -374,7 +295,7 @@ class _AppSidebarState extends State<_AppSidebar> {
                                     fontWeight: FontWeight
                                         .w800, // Força o bold geométrico da Poppins
                                     fontSize: 16,
-                                    color: _brancoPuro,
+                                    color: _textoAtivo,
                                     letterSpacing: 1.2,
                                   ),
                                 ),
@@ -383,7 +304,7 @@ class _AppSidebarState extends State<_AppSidebar> {
                             IconButton(
                               icon: const Icon(
                                 Icons.menu_open,
-                                color: _brancoPuro,
+                                color: _texto,
                               ),
                               onPressed: () =>
                                   setState(() => _recolhida = true),
@@ -412,27 +333,44 @@ class _AppSidebarState extends State<_AppSidebar> {
                     horizontal: 16,
                     vertical: 8,
                   ),
-                  child: Divider(
-                    height: 1,
-                    color: Colors.white.withOpacity(0.15),
-                  ),
+                  child: const Divider(height: 1, color: _borda),
                 ),
                 _item(AppPage.config),
                 const SizedBox(height: 8),
               ],
 
-              // ── Rodapé com a versão ────────────────────────────────────
+              // ── Rodapé: desenvolvido por + versão ───────────────────────
               if (!_recolhida)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 20, left: 24),
-                  child: Text(
-                    'Versão 0.0.6',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight
-                          .w400, // Ajuste sutil para a Poppins pequena
-                      color: Colors.white.withOpacity(0.5),
-                    ),
+                  padding: const EdgeInsets.only(bottom: 16, left: 24, right: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Desenvolvido por',
+                        style: TextStyle(fontSize: 10, color: _textoSutil),
+                      ),
+                      const SizedBox(height: 4),
+                      Image.asset(
+                        'assets/pole_tecn.png',
+                        height: 28,
+                        fit: BoxFit.contain,
+                        alignment: Alignment.centerLeft,
+                        errorBuilder: (_, __, ___) => const Text(
+                          'Pole Tecnologia',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: _texto,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Versão 0.0.7',
+                        style: TextStyle(fontSize: 11, color: _textoSutil),
+                      ),
+                    ],
                   ),
                 ),
               if (_recolhida) const SizedBox(height: 20),
@@ -452,15 +390,13 @@ class _AppSidebarState extends State<_AppSidebar> {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         child: Material(
-          color: ativo ? _brancoPuro : Colors.transparent,
+          color: ativo ? _ativoFundo : Colors.transparent,
           borderRadius: BorderRadius.circular(24),
-          elevation: ativo ? 2 : 0,
-          shadowColor: Colors.black.withOpacity(0.1),
           child: InkWell(
             onTap: () => widget.onSelect(page),
             borderRadius: BorderRadius.circular(24),
-            hoverColor: _brancoHover,
-            splashColor: _brancoHover,
+            hoverColor: ativo ? _ativoFundo : _hover,
+            splashColor: _ativoFundo,
             child: SizedBox(
               height: 48,
               child: Padding(
@@ -470,7 +406,7 @@ class _AppSidebarState extends State<_AppSidebar> {
                         child: Icon(
                           page.icon,
                           size: 24,
-                          color: ativo ? _laranjaFundo : _brancoOpaco,
+                          color: ativo ? _textoAtivo : _texto,
                         ),
                       )
                     : Row(
@@ -478,7 +414,7 @@ class _AppSidebarState extends State<_AppSidebar> {
                           Icon(
                             page.icon,
                             size: 22,
-                            color: ativo ? _laranjaFundo : _brancoOpaco,
+                            color: ativo ? _textoAtivo : _texto,
                           ),
                           const SizedBox(width: 14),
                           Expanded(
@@ -491,7 +427,7 @@ class _AppSidebarState extends State<_AppSidebar> {
                                 fontWeight: ativo
                                     ? FontWeight.w600
                                     : FontWeight.w500,
-                                color: ativo ? _laranjaFundo : _brancoOpaco,
+                                color: ativo ? _textoAtivo : _texto,
                               ),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -507,30 +443,6 @@ class _AppSidebarState extends State<_AppSidebar> {
   }
 }
 // ─────────────────────────────────────────────────────────────────────────────
-// Modelo interno de parâmetros de navegação para PrecoScreen
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _PrecoParams {
-  final SapModo modo;
-  final String pltyp;
-  final String? kdgrp;
-  final DateTime? datab;
-  final DateTime? datbi;
-  final String? databOp;
-  final String? datbiOp;
-
-  const _PrecoParams({
-    required this.modo,
-    required this.pltyp,
-    this.kdgrp,
-    this.datab,
-    this.datbi,
-    this.databOp,
-    this.datbiOp,
-  });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Diálogo de seleção de modo SAP (Lista vs Lista+Grupo)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -542,7 +454,7 @@ class _ModoPrecoDialog extends StatefulWidget {
 }
 
 class _ModoPrecoDialogState extends State<_ModoPrecoDialog> {
-  static const _corLaranja = Color(0xFFFF6B00);
+  static const _corLaranja = Color(0xFFE8793A);
   static const _corTexto = Color(0xFF0F172A);
   static const _corSubtexto = Color(0xFF64748B);
   static const _corBorda = Color(0xFFE2E8F0);
@@ -819,7 +731,7 @@ class _ModoPrecoDialogState extends State<_ModoPrecoDialog> {
                     child: FilledButton(
                       onPressed: _podeConfirmar
                           ? () => Navigator.of(context).pop(
-                              _PrecoParams(
+                              PrecoParams(
                                 modo: _modo,
                                 pltyp: _pltypSelecionado!,
                                 kdgrp: _kdgrpSelecionado,
@@ -1131,7 +1043,7 @@ class DateFilterDialog extends StatefulWidget {
 }
 
 class _DateFilterDialogState extends State<DateFilterDialog> {
-  static const _laranja = Color(0xFFFF6B00);
+  static const _laranja = Color(0xFFE8793A);
 
   late DateOp _op;
   late TextEditingController _ctrl;
@@ -1373,7 +1285,7 @@ class _LoadingField extends StatelessWidget {
           height: 14,
           child: CircularProgressIndicator(
             strokeWidth: 2,
-            color: Color(0xFFFF6B00),
+            color: Color(0xFFE8793A),
           ),
         ),
         SizedBox(width: 10),

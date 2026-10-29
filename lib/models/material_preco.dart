@@ -66,6 +66,10 @@ class MaterialPreco {
   // Marcação local de remoção (não persiste, apenas esconde da UI)
   bool removido;
 
+  // Listas filhas (pltyp) que NÃO recebem este material. Vazio = vai para
+  // todas as listas da política. A lista mãe sempre recebe.
+  final Set<String> listasExcluidas = <String>{};
+
   // ── Novo preço (caixa) — mantido para compatibilidade com saveDraft ─────
   double novoPreco;
 

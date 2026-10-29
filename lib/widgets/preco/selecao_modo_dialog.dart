@@ -53,7 +53,7 @@ class _DateMaskFormatter extends TextInputFormatter {
   }
 }
 
-const _laranja = Color(0xFFFF6B00);
+const _laranja = Color(0xFFE8793A);
 
 Future<void> abrirSelecaoModo(BuildContext context) async {
   await showModalBottomSheet(

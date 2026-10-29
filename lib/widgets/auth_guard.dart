@@ -8,19 +8,19 @@
 
 import 'package:flutter/material.dart';
 import 'package:pole_price/controllers/permissao_controller.dart';
-import 'package:pole_price/widgets/app_shell.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:pole_price/screens/login_page.dart';
 
 class AuthGuard extends StatefulWidget {
-  const AuthGuard({super.key});
+  /// Constrói o app (AppShell) quando as permissões estão carregadas e ok.
+  final WidgetBuilder builder;
+  const AuthGuard({super.key, required this.builder});
 
   @override
   State<AuthGuard> createState() => _AuthGuardState();
 }
 
 class _AuthGuardState extends State<AuthGuard> {
-  static const _laranja = Color(0xFFFF6B00);
+  static const _laranja = Color(0xFFE8793A);
 
   @override
   void initState() {
@@ -51,7 +51,7 @@ class _AuthGuardState extends State<AuthGuard> {
     // Carregando permissões
     if (ctrl.loading) {
       return const Scaffold(
-        backgroundColor: Color(0xFFF8F9FA),
+        backgroundColor: Color(0xFFF7F5F2),
         body: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -86,18 +86,13 @@ class _AuthGuardState extends State<AuthGuard> {
     }
 
     // Tudo ok — entra no app
-    return const AppShell();
+    return widget.builder(context);
   }
 
   Future<void> _sair() async {
     await Supabase.instance.client.auth.signOut();
     PermissaoController.reset();
-    if (mounted) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const LoginPage()),
-      );
-    }
+    // O router redireciona para /login quando a sessão acaba.
   }
 }
 
@@ -113,7 +108,7 @@ class _SemAcesso extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FA),
+      backgroundColor: const Color(0xFFF7F5F2),
       body: Center(
         child: Container(
           width: 420,
@@ -197,7 +192,7 @@ class _ErroCarregamento extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FA),
+      backgroundColor: const Color(0xFFF7F5F2),
       body: Center(
         child: Container(
           width: 420,
@@ -258,7 +253,7 @@ class _ErroCarregamento extends StatelessWidget {
                     child: ElevatedButton(
                       onPressed: onRetry,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFFF6B00),
+                        backgroundColor: const Color(0xFFE8793A),
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(

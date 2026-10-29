@@ -14,7 +14,7 @@ class BackgroundTaskOverlay extends StatefulWidget {
 }
 
 class _BackgroundTaskOverlayState extends State<BackgroundTaskOverlay> {
-  static const _laranja = Color(0xFFFF6B00);
+  static const _laranja = Color(0xFFE8793A);
   static const _verde = Color(0xFF047857);
   static const _vermelho = Color(0xFFB91C1C);
   static const _texto = Color(0xFF0F172A);

@@ -11,7 +11,7 @@ class RascunhosScreen extends StatefulWidget {
 }
 
 class _RascunhosScreenState extends State<RascunhosScreen> {
-  static const _laranja = Color(0xFFFF6B00);
+  static const _laranja = Color(0xFFE8793A);
 
   bool _loading = true;
   List<_RascunhoItem> _rascunhos = [];
@@ -167,7 +167,7 @@ class _RascunhosScreenState extends State<RascunhosScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F6F8),
+      backgroundColor: const Color(0xFFF7F5F2),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -235,7 +235,7 @@ class _RascunhosScreenState extends State<RascunhosScreen> {
 
 // ── Card de rascunho ──────────────────────────────────────────────────────────
 class _RascunhoCard extends StatelessWidget {
-  static const _laranja = Color(0xFFFF6B00);
+  static const _laranja = Color(0xFFE8793A);
   final _RascunhoItem item;
   final String Function(String) formatarData;
   final VoidCallback onEditar;

@@ -5,7 +5,7 @@ import 'package:pole_price/widgets/tabela_precos.dart';
 import 'package:pole_price/widgets/preco/busca_material_sheet.dart';
 import 'package:pole_price/widgets/preco/preco_topbar.dart'; // _VigenciaGlobalButton
 
-const _laranja = Color(0xFFFF6B00);
+const _laranja = Color(0xFFE8793A);
 
 class PainelEsquerdo extends StatefulWidget {
   final PrecoController controller;
@@ -108,9 +108,6 @@ class _PainelEsquerdoState extends State<PainelEsquerdo> {
                         onChanged: c.buscar,
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    // ── Vigência global (vinda do topbar) ─────────────
-                    VigenciaGlobalButton(controller: c),
                   ],
                 ),
               ],

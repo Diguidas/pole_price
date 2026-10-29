@@ -1,5 +1,6 @@
 import 'package:pole_price/models/product_group_model.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:pole_price/service/supabase_paginacao.dart';
 
 class ProductGroupService {
   final SupabaseClient supabase;
@@ -15,9 +16,11 @@ class ProductGroupService {
         .order('name');
 
     // 2. Conta SKUs por cluster
-    final countsRes = await supabase
+    final countsRes = await paginar((a, b) => supabase
         .from('products')
-        .select('pricing_cluster_id');
+        .select('pricing_cluster_id')
+        .order('code')
+        .range(a, b));
 
     final Map<String, int> skuCount = {};
     for (final p in countsRes as List) {

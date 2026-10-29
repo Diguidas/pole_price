@@ -70,7 +70,7 @@ class _ResumoDraftSheet extends StatefulWidget {
 }
 
 class _ResumoDraftSheetState extends State<_ResumoDraftSheet> {
-  static const _laranja = Color(0xFFFF6B00);
+  static const _laranja = Color(0xFFE8793A);
 
   late final TextEditingController _justificativaCtrl;
   bool _justificativaVazia = false;
@@ -109,7 +109,7 @@ class _ResumoDraftSheetState extends State<_ResumoDraftSheet> {
       expand: false,
       builder: (_, scrollController) => Container(
         decoration: const BoxDecoration(
-          color: Color(0xFFF5F6F8),
+          color: Color(0xFFF7F5F2),
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
         child: Column(

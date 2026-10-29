@@ -6,7 +6,7 @@ import 'package:pole_price/widgets/resumo_aprovacao_sheet.dart';
 import 'package:pole_price/widgets/app_shell.dart'; // AppShell, AppPage
 import 'package:pole_price/widgets/preco/limites_sap_agrupamento_dialog.dart';
 
-const _laranja = Color(0xFFFF6B00);
+const _laranja = Color(0xFFE8793A);
 
 class PrecoTopbar extends StatelessWidget {
   final PrecoController controller;
@@ -51,7 +51,7 @@ class PrecoTopbar extends StatelessWidget {
                         vertical: 2,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFF6B00),
+                        color: const Color(0xFFE8793A),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
@@ -128,17 +128,7 @@ class PrecoTopbar extends StatelessWidget {
             onPressed: !temDados
                 ? null
                 : () async {
-                    if (controller.vigenciaGlobalDatab == null) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Informe a vigência global antes de salvar.',
-                          ),
-                          backgroundColor: Colors.red,
-                        ),
-                      );
-                      return;
-                    }
+                    // A vigência é definida por lista na tela de Aprovações.
                     if (controller.selecionada == null) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
@@ -229,15 +219,6 @@ class _SalvarRascunhoButtonState extends State<_SalvarRascunhoButton> {
       onPressed: (!temDados || _salvando)
           ? null
           : () async {
-              if (widget.controller.vigenciaGlobalDatab == null) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Informe a vigência global antes de salvar.'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-                return;
-              }
               if (widget.controller.selecionada == null) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Lista mãe não identificada.')),
@@ -1002,11 +983,11 @@ class _StatusFilterDialog extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           color: selected
-              ? const Color(0xFFFF6B00).withOpacity(0.08)
+              ? const Color(0xFFE8793A).withOpacity(0.08)
               : Colors.grey.shade50,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: selected ? const Color(0xFFFF6B00) : Colors.grey.shade200,
+            color: selected ? const Color(0xFFE8793A) : Colors.grey.shade200,
           ),
         ),
         child: Row(
@@ -1014,7 +995,7 @@ class _StatusFilterDialog extends StatelessWidget {
             Icon(
               icon,
               size: 18,
-              color: selected ? const Color(0xFFFF6B00) : Colors.grey.shade500,
+              color: selected ? const Color(0xFFE8793A) : Colors.grey.shade500,
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -1027,7 +1008,7 @@ class _StatusFilterDialog extends StatelessWidget {
                       fontWeight: FontWeight.w600,
                       fontSize: 13,
                       color: selected
-                          ? const Color(0xFFFF6B00)
+                          ? const Color(0xFFE8793A)
                           : Colors.grey.shade800,
                     ),
                   ),
@@ -1039,7 +1020,7 @@ class _StatusFilterDialog extends StatelessWidget {
               ),
             ),
             if (selected)
-              const Icon(Icons.check, size: 16, color: Color(0xFFFF6B00)),
+              const Icon(Icons.check, size: 16, color: Color(0xFFE8793A)),
           ],
         ),
       ),

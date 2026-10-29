@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:pole_price/controllers/preco_controller.dart';
 
-const _laranja = Color(0xFFFF6B00);
+const _laranja = Color(0xFFE8793A);
 
 Future<void> abrirSeletorTargets(
   BuildContext context,

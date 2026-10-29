@@ -1,5 +1,7 @@
+import 'package:pole_price/models/draft_lista.dart';
 import 'package:pole_price/models/material_draft_preview.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:pole_price/service/supabase_paginacao.dart';
 
 /// Lançada quando o SAP confirma o recebimento do push, mas reporta que um
 /// ou mais materiais não foram efetivamente gravados (BDC do lado ABAP não
@@ -87,6 +89,7 @@ class DraftPricingService {
     final itensRes = futures[0] as List;
     final targetsRes = futures[1] as List;
     final excecoesRes = futures[2] as List;
+    final exclusoes = await carregarExclusoes(draftId);
 
     // ── 3. Mapa de preços da lista mãe (só editados) ─────────────────────
     // new_price = preço que o usuário digitou no SAP
@@ -140,15 +143,34 @@ class DraftPricingService {
     if (precoNovoPorPid.isNotEmpty) {
       final pids = precoNovoPorPid.keys.toList();
       final futurasExtras = await Future.wait<dynamic>([
-        supabase.from('products').select('code, name').inFilter('code', pids),
-        supabase
-            .from('materials')
-            .select('material_code, peso_unidade, peso_caixa')
-            .inFilter('material_code', pids),
-        supabase
-            .from('product_costs')
-            .select('product_code, ded_pct, dv_pct, period')
-            .inFilter('product_code', pids),
+        emBlocos(
+          pids,
+          (parte) => paginar((a, b) => supabase
+              .from('products')
+              .select('code, name')
+              .inFilter('code', parte)
+              .order('code')
+              .range(a, b)),
+        ),
+        emBlocos(
+          pids,
+          (parte) => paginar((a, b) => supabase
+              .from('materials')
+              .select('material_code, peso_unidade, peso_caixa')
+              .inFilter('material_code', parte)
+              .order('material_code')
+              .range(a, b)),
+        ),
+        emBlocos(
+          pids,
+          (parte) => paginar((a, b) => supabase
+              .from('product_costs')
+              .select('product_code, ded_pct, dv_pct, period')
+              .inFilter('product_code', parte)
+              .order('product_code')
+              .order('period')
+              .range(a, b)),
+        ),
         if (masterListId != null)
           supabase
               .from('price_lists')
@@ -315,6 +337,8 @@ class DraftPricingService {
 
       // Aplica regras sobre cada produto editado na mãe
       for (final pid in precoNovoPorPid.keys) {
+        // Material escolhido para NÃO ir a esta lista filha.
+        if (exclusoes[targetListId]?.contains(pid) ?? false) continue;
         final precoBase = precoNovoPorPid[pid]!;
         final precoAntigoMae = precoAntigoPorPid[pid] ?? 0.0;
         final desc = descricaoPorPid[pid] ?? pid;
@@ -382,7 +406,189 @@ class DraftPricingService {
     );
   }
 
-  Future<int> applyDraft(String draftId) async {
+  // ── Materiais que NÃO vão para cada lista filha ──────────────────────────
+
+  /// pltyp da lista filha → códigos dos materiais que ela NÃO recebe.
+  /// Vazio se não há exclusões ou se a tabela ainda não existe (migração).
+  Future<Map<String, Set<String>>> carregarExclusoes(String draftId) async {
+    try {
+      final rows = await paginar((a, b) => supabase
+          .from('price_draft_item_exclusions')
+          .select('pltyp, product_id')
+          .eq('draft_id', draftId)
+          .order('pltyp')
+          .order('product_id')
+          .range(a, b));
+      final out = <String, Set<String>>{};
+      for (final r in rows) {
+        final l = r['pltyp']?.toString();
+        final p = r['product_id']?.toString();
+        if (l == null || p == null) continue;
+        out.putIfAbsent(l, () => <String>{}).add(p);
+      }
+      return out;
+    } catch (e) {
+      if (e is PostgrestException &&
+          (e.code == '42P01' ||
+              e.code == 'PGRST205' ||
+              e.message.contains('price_draft_item_exclusions'))) {
+        return {};
+      }
+      rethrow;
+    }
+  }
+
+  // ── Listas do rascunho (vigência e status de envio por lista) ─────────────
+
+  static String? _soDigitosData(dynamic v) {
+    if (v == null) return null;
+    final d = v.toString().replaceAll(RegExp(r'[^0-9]'), '');
+    return d.length >= 8 ? d.substring(0, 8) : null;
+  }
+
+  static bool _tabelaListasAusente(Object e) =>
+      e is PostgrestException &&
+      (e.code == '42P01' ||
+          e.code == 'PGRST205' ||
+          (e.message.contains('price_draft_lists')));
+
+  /// Lista mãe + filhas do rascunho com vigência e status de envio. Cria as
+  /// linhas que ainda não existem em `price_draft_lists` (vigência inicial =
+  /// a do rascunho). Se a tabela não existe (migração pendente), devolve as
+  /// listas só em memória com `persistido: false`.
+  Future<DraftListasResult> carregarListasDoDraft(String draftId) async {
+    final draft = await supabase
+        .from('price_drafts')
+        .select('master_list_id, vigencia_datab, vigencia_datbi')
+        .eq('id', draftId)
+        .single();
+    final master = draft['master_list_id']?.toString() ?? '';
+
+    final results = await Future.wait<dynamic>([
+      supabase
+          .from('price_draft_targets')
+          .select('target_list_id')
+          .eq('draft_id', draftId),
+    ]);
+    final targets = results[0] as List;
+
+    // Vigência inicial = a do rascunho (só existe em rascunhos antigos, que
+    // exigiam vigência global). Os itens NÃO servem de padrão: sem vigência
+    // global eles carregam a vigência antiga do SAP, e a nova é definida por
+    // lista na aprovação.
+    final datab = _soDigitosData(draft['vigencia_datab']);
+    final datbi = _soDigitosData(draft['vigencia_datbi']);
+
+    final ordem = <String>[
+      if (master.isNotEmpty) master,
+      for (final t in targets)
+        if ((t['target_list_id']?.toString() ?? '').isNotEmpty &&
+            t['target_list_id'].toString() != master)
+          t['target_list_id'].toString(),
+    ];
+
+    final nomes = <String, String>{};
+    if (ordem.isNotEmpty) {
+      final res = await supabase
+          .from('price_lists')
+          .select('pltyp, ptext')
+          .inFilter('pltyp', ordem);
+      for (final l in res as List) {
+        nomes[l['pltyp'].toString()] = l['ptext']?.toString() ?? '';
+      }
+    }
+
+    var persistido = true;
+    var existentes = <Map<String, dynamic>>[];
+    try {
+      final res = await supabase
+          .from('price_draft_lists')
+          .select()
+          .eq('draft_id', draftId);
+      existentes = (res as List).cast<Map<String, dynamic>>();
+    } catch (e) {
+      if (!_tabelaListasAusente(e)) rethrow;
+      persistido = false;
+    }
+    final porPltyp = {for (final r in existentes) r['pltyp'].toString(): r};
+
+    if (persistido) {
+      final novas = [
+        for (final p in ordem)
+          if (!porPltyp.containsKey(p))
+            {
+              'draft_id': draftId,
+              'pltyp': p,
+              'is_master': p == master,
+              'datab': datab,
+              'datbi': datbi,
+              'status': 'pending',
+            },
+      ];
+      if (novas.isNotEmpty) {
+        await supabase.from('price_draft_lists').insert(novas);
+        for (final n in novas) {
+          porPltyp[n['pltyp'] as String] = n;
+        }
+      }
+    }
+
+    final listas = [
+      for (final p in ordem)
+        DraftLista(
+          pltyp: p,
+          isMaster: p == master,
+          nome: (nomes[p] ?? '').isEmpty ? p : nomes[p]!,
+          datab: _soDigitosData(porPltyp[p]?['datab']) ?? datab,
+          datbi: _soDigitosData(porPltyp[p]?['datbi']) ?? datbi,
+          status: porPltyp[p]?['status']?.toString() ?? 'pending',
+          sentAt: DateTime.tryParse(porPltyp[p]?['sent_at']?.toString() ?? ''),
+          sentByEmail: porPltyp[p]?['sent_by_email']?.toString(),
+        ),
+    ];
+    // Quantos materiais cada lista recebe (para o resumo na Aprovação).
+    try {
+      final itensRes = await paginar((a, b) => supabase
+          .from('price_draft_items')
+          .select('product_id')
+          .eq('draft_id', draftId)
+          .order('product_id')
+          .range(a, b));
+      final total = itensRes.length;
+      final exclusoes = await carregarExclusoes(draftId);
+      for (final l in listas) {
+        l.totalMateriais = total;
+        l.excluidos = l.isMaster ? <String>{} : (exclusoes[l.pltyp] ?? <String>{});
+      }
+    } catch (_) {
+      // só informativo — não impede abrir o rascunho
+    }
+    return DraftListasResult(listas: listas, persistido: persistido);
+  }
+
+  /// Grava a vigência (AAAAMMDD) das listas [pltyps] do rascunho. Só as listas
+  /// ainda pendentes são alteradas (as já enviadas ao SAP não mudam).
+  Future<void> salvarVigenciaListas(
+    String draftId,
+    List<String> pltyps, {
+    required String datab,
+    required String datbi,
+  }) async {
+    if (pltyps.isEmpty) return;
+    await supabase
+        .from('price_draft_lists')
+        .update({'datab': datab, 'datbi': datbi})
+        .eq('draft_id', draftId)
+        .eq('status', 'pending')
+        .inFilter('pltyp', pltyps);
+  }
+
+  /// Publica o rascunho no SAP.
+  ///
+  /// [pltyps] = listas a enviar; null = todas que ainda não foram enviadas.
+  /// As demais ficam 'pending' e o rascunho continua aguardando aprovação.
+  /// Cada lista vai com a própria vigência (`price_draft_lists`).
+  Future<int> applyDraft(String draftId, {List<String>? pltyps}) async {
     final itemsRes = await supabase
         .from('price_draft_items')
         .select(
@@ -391,94 +597,47 @@ class DraftPricingService {
         .eq('draft_id', draftId);
 
     final items = itemsRes as List;
-    if (items.isEmpty)
+    if (items.isEmpty) {
       throw Exception('Nenhum item encontrado neste rascunho.');
+    }
 
-    final draftData = await supabase
-        .from('price_drafts')
-        .select('master_list_id')
-        .eq('id', draftId)
-        .single();
+    final listasRes = await carregarListasDoDraft(draftId);
+    if (listasRes.listas.isEmpty) {
+      throw Exception('Draft sem lista mãe (pltyp) definida.');
+    }
 
-    final String pltyp = draftData['master_list_id']?.toString() ?? '';
-    if (pltyp.isEmpty) throw Exception('Draft sem lista mãe (pltyp) definida.');
-
-    final results = await Future.wait([
-      supabase
-          .from('price_draft_targets')
-          .select('target_list_id')
-          .eq('draft_id', draftId),
-      supabase
-          .from('price_draft_exceptions')
-          .select(
-            'target_list_id, level, adjust_type, value, cluster_id, material_id',
-          )
-          .eq('draft_id', draftId),
-    ]);
-
-    final targetsRes = results[0] as List;
-    final excecoesRes = results[1] as List;
-
-    final pids = items.map((i) => i['product_id']?.toString() ?? '').toList();
-    final clusterMap = await _clusterMapForProducts(pids);
-
-    final falhas = <Map<String, dynamic>>[];
-
-    // Envia lista mãe
-    falhas.addAll(
-      await _enviarPayload(pltyp, _montarSapItems(items, clusterMap, [])),
-    );
-
-    // Envia cada lista filha com regras aplicadas
-    for (final target in targetsRes) {
-      final filhaPltyp = target['target_list_id']?.toString() ?? '';
-      if (filhaPltyp.isEmpty) continue;
-
-      final regrasFilha = excecoesRes
-          .where((e) => e['target_list_id']?.toString() == filhaPltyp)
-          .toList();
-
-      falhas.addAll(
-        await _enviarPayload(
-          filhaPltyp,
-          _montarSapItems(items, clusterMap, regrasFilha),
-        ),
+    final aEnviar = listasRes.listas
+        .where(
+          (l) =>
+              !l.enviada && (pltyps == null || pltyps.contains(l.pltyp)),
+        )
+        .toList();
+    if (aEnviar.isEmpty) {
+      throw Exception('Nenhuma lista pendente selecionada para enviar.');
+    }
+    final semVigencia = listasRes.persistido
+        ? aEnviar.where((l) => !l.temVigencia).toList()
+        : <DraftLista>[]; // sem a tabela por lista, usa a vigência dos itens
+    if (semVigencia.isNotEmpty) {
+      throw Exception(
+        'Defina a vigência das listas: '
+        '${semVigencia.map((l) => l.nome).join(', ')}.',
       );
     }
 
-    final falhaMatnrs = falhas
-        .map((f) => f['matnr']?.toString())
-        .whereType<String>()
-        .toSet();
-    final itensOk = items
-        .where((i) => !falhaMatnrs.contains(i['product_id']?.toString()))
-        .toList();
-
-    // Marca no price_draft_items só os materiais que o SAP não confirmou
-    // (coluna sap_erro) — os demais são aprovados normalmente. Assim o
-    // usuário só precisa reprocessar os itens problemáticos, sem reenviar
-    // (nem recriar) a lista inteira.
-    await _marcarFalhasNosItens(draftId, items, falhaMatnrs, falhas);
-
-    if (itensOk.isNotEmpty) {
-      await _gravarPpcHistorico(draftId, pltyp, targetsRes, itensOk);
-    }
-
-    await supabase
-        .from('price_drafts')
-        .update({'status': 'approved'})
-        .eq('id', draftId);
-
-    if (falhas.isNotEmpty) {
-      throw SapPushFalhasException(total: items.length, falhas: falhas);
-    }
-
-    return items.length;
+    return _publicar(
+      draftId: draftId,
+      items: items,
+      listas: listasRes.listas,
+      aEnviar: aEnviar,
+      persistido: listasRes.persistido,
+    );
   }
 
   /// Reenvia ao SAP apenas os materiais deste draft marcados com sap_erro
   /// (falharam numa aprovação anterior) — não recria nem reenvia os itens
-  /// que já foram confirmados.
+  /// que já foram confirmados. Só vai para listas que JÁ foram publicadas;
+  /// listas ainda pendentes de aprovação nunca recebem preço por aqui.
   Future<int> reprocessarFalhas(String draftId) async {
     final itemsRes = await supabase
         .from('price_draft_items')
@@ -495,70 +654,155 @@ class DraftPricingService {
       );
     }
 
-    final draftData = await supabase
-        .from('price_drafts')
-        .select('master_list_id')
-        .eq('id', draftId)
-        .single();
+    final listasRes = await carregarListasDoDraft(draftId);
+    if (listasRes.listas.isEmpty) {
+      throw Exception('Draft sem lista mãe (pltyp) definida.');
+    }
 
-    final String pltyp = draftData['master_list_id']?.toString() ?? '';
-    if (pltyp.isEmpty) throw Exception('Draft sem lista mãe (pltyp) definida.');
+    final aEnviar = listasRes.persistido
+        ? listasRes.listas.where((l) => l.foiPublicada).toList()
+        : listasRes.listas;
+    if (aEnviar.isEmpty) {
+      throw Exception('Nenhuma lista publicada para reprocessar.');
+    }
 
-    final results = await Future.wait([
-      supabase
-          .from('price_draft_targets')
-          .select('target_list_id')
-          .eq('draft_id', draftId),
-      supabase
-          .from('price_draft_exceptions')
-          .select(
-            'target_list_id, level, adjust_type, value, cluster_id, material_id',
-          )
-          .eq('draft_id', draftId),
-    ]);
+    return _publicar(
+      draftId: draftId,
+      items: items,
+      listas: listasRes.listas,
+      aEnviar: aEnviar,
+      persistido: listasRes.persistido,
+      reprocesso: true,
+    );
+  }
 
-    final targetsRes = results[0] as List;
-    final excecoesRes = results[1] as List;
+  /// Envia [items] para cada lista de [aEnviar] (com a vigência dela),
+  /// registra o resultado por lista e atualiza o status do rascunho.
+  Future<int> _publicar({
+    required String draftId,
+    required List items,
+    required List<DraftLista> listas,
+    required List<DraftLista> aEnviar,
+    required bool persistido,
+    bool reprocesso = false,
+  }) async {
+    final excecoesRes = await supabase
+        .from('price_draft_exceptions')
+        .select(
+          'target_list_id, level, adjust_type, value, cluster_id, material_id',
+        )
+        .eq('draft_id', draftId);
 
     final pids = items.map((i) => i['product_id']?.toString() ?? '').toList();
     final clusterMap = await _clusterMapForProducts(pids);
+    final exclusoes = await carregarExclusoes(draftId);
 
-    final falhas = <Map<String, dynamic>>[];
-
-    falhas.addAll(
-      await _enviarPayload(pltyp, _montarSapItems(items, clusterMap, [])),
-    );
-
-    for (final target in targetsRes) {
-      final filhaPltyp = target['target_list_id']?.toString() ?? '';
-      if (filhaPltyp.isEmpty) continue;
-
-      final regrasFilha = excecoesRes
-          .where((e) => e['target_list_id']?.toString() == filhaPltyp)
+    // Materiais de cada lista: a mãe recebe todos; cada filha, todos menos os
+    // que foram escolhidos para ficar de fora dela.
+    List itensDaLista(DraftLista l) {
+      final fora = l.isMaster ? null : exclusoes[l.pltyp];
+      if (fora == null || fora.isEmpty) return items;
+      return items
+          .where((i) => !fora.contains(i['product_id']?.toString()))
           .toList();
-
-      falhas.addAll(
-        await _enviarPayload(
-          filhaPltyp,
-          _montarSapItems(items, clusterMap, regrasFilha),
-        ),
-      );
     }
 
+    final falhasPorLista = <String, List<Map<String, dynamic>>>{};
+    Object? erroEnvio;
+    StackTrace? erroTrace;
+
+    for (final l in aEnviar) {
+      final regras = l.isMaster
+          ? const []
+          : (excecoesRes as List)
+                .where((e) => e['target_list_id']?.toString() == l.pltyp)
+                .toList();
+      final itensLista = itensDaLista(l);
+      if (itensLista.isEmpty) {
+        // Nenhum material para esta lista: nada a enviar ao SAP.
+        falhasPorLista[l.pltyp] = [];
+        continue;
+      }
+      try {
+        falhasPorLista[l.pltyp] = await _enviarPayload(
+          l.pltyp,
+          _montarSapItems(itensLista, clusterMap, regras,
+              datab: l.datab, datbi: l.datbi),
+        );
+      } catch (e, st) {
+        // Falha de comunicação nesta lista: para aqui. As listas já
+        // processadas são registradas abaixo; esta e as seguintes seguem
+        // pendentes.
+        erroEnvio = e;
+        erroTrace = st;
+        break;
+      }
+    }
+
+    final falhas = [for (final f in falhasPorLista.values) ...f];
     final falhaMatnrs = falhas
         .map((f) => f['matnr']?.toString())
         .whereType<String>()
         .toSet();
-    final itensOk = items
-        .where((i) => !falhaMatnrs.contains(i['product_id']?.toString()))
-        .toList();
 
-    await _marcarFalhasNosItens(draftId, items, falhaMatnrs, falhas);
-
-    if (itensOk.isNotEmpty) {
-      await _gravarPpcHistorico(draftId, pltyp, targetsRes, itensOk);
+    // Status por lista (só das que foram de fato processadas).
+    final email = supabase.auth.currentUser?.email;
+    for (final entry in falhasPorLista.entries) {
+      final l = aEnviar.firstWhere((x) => x.pltyp == entry.key);
+      l.status = entry.value.isEmpty ? 'sent' : 'error';
+      l.sentAt = DateTime.now();
+      l.sentByEmail = email;
+      if (persistido) {
+        await supabase
+            .from('price_draft_lists')
+            .update({
+              'status': l.status,
+              'sent_at': l.sentAt!.toIso8601String(),
+              'sent_by_email': email,
+            })
+            .eq('draft_id', draftId)
+            .eq('pltyp', l.pltyp);
+      }
     }
 
+    // sap_erro nos itens: só limpa se nenhuma lista continua com erro.
+    final aindaComErro = listas.any((l) => l.comErro);
+    await _marcarFalhasNosItens(
+      draftId,
+      items,
+      falhaMatnrs,
+      falhas,
+      limparOk: !aindaComErro,
+    );
+
+    // PPC histórico: só das listas enviadas, com a vigência de cada uma.
+    final porLista = <MapEntry<DraftLista, List>>[];
+    for (final entry in falhasPorLista.entries) {
+      final l = aEnviar.firstWhere((x) => x.pltyp == entry.key);
+      final matnrsComFalha = entry.value
+          .map((f) => f['matnr']?.toString())
+          .whereType<String>()
+          .toSet();
+      final ok = itensDaLista(l)
+          .where((i) => !matnrsComFalha.contains(i['product_id']?.toString()))
+          .toList();
+      if (ok.isNotEmpty) porLista.add(MapEntry(l, ok));
+    }
+    if (porLista.isNotEmpty) {
+      await _gravarPpcHistorico(draftId, porLista);
+    }
+
+    // O rascunho só vira 'approved' quando não resta lista pendente.
+    if (!reprocesso && (!persistido || !listas.any((l) => l.pendente))) {
+      await supabase
+          .from('price_drafts')
+          .update({'status': 'approved'})
+          .eq('id', draftId);
+    }
+
+    if (erroEnvio != null) {
+      Error.throwWithStackTrace(erroEnvio, erroTrace ?? StackTrace.current);
+    }
     if (falhas.isNotEmpty) {
       throw SapPushFalhasException(total: items.length, falhas: falhas);
     }
@@ -572,8 +816,9 @@ class DraftPricingService {
     String draftId,
     List items,
     Set<String> falhaMatnrs,
-    List<Map<String, dynamic>> falhas,
-  ) async {
+    List<Map<String, dynamic>> falhas, {
+    bool limparOk = true,
+  }) async {
     final erroPorMatnr = <String, String>{
       for (final f in falhas)
         (f['matnr']?.toString() ?? ''): (f['erro']?.toString() ??
@@ -585,7 +830,7 @@ class DraftPricingService {
         .where((pid) => pid.isNotEmpty && !falhaMatnrs.contains(pid))
         .toList();
 
-    if (okIds.isNotEmpty) {
+    if (limparOk && okIds.isNotEmpty) {
       await supabase
           .from('price_draft_items')
           .update({'sap_erro': null})
@@ -604,31 +849,26 @@ class DraftPricingService {
   }
 
   /// Congela o PPC usado neste ciclo — vira o "PPC Atual" na próxima vez
-  /// que essa lista (mãe e filhas) for aberta na Gestão de Preços.
+  /// que essa lista for aberta na Gestão de Preços. Grava só para as listas
+  /// efetivamente enviadas, com a vigência de cada uma.
   Future<void> _gravarPpcHistorico(
     String draftId,
-    String pltyp,
-    List targetsRes,
-    List items,
+    List<MapEntry<DraftLista, List>> porLista,
   ) async {
-    final pltyps = <String>{
-      pltyp,
-      ...targetsRes.map((t) => t['target_list_id']?.toString() ?? ''),
-    }..removeWhere((p) => p.isEmpty);
-
     final rows = <Map<String, dynamic>>[];
-    for (final item in items) {
-      final ppcNovo = _toDouble(item['ppc_novo']);
-      if (ppcNovo == null) continue;
-      final pid = item['product_id']?.toString();
-      if (pid == null) continue;
-      for (final p in pltyps) {
+    for (final entry in porLista) {
+      final lista = entry.key;
+      for (final item in entry.value) {
+        final ppcNovo = _toDouble(item['ppc_novo']);
+        if (ppcNovo == null) continue;
+        final pid = item['product_id']?.toString();
+        if (pid == null) continue;
         rows.add({
-          'pltyp': p,
+          'pltyp': lista.pltyp,
           'product_code': pid,
           'ppc': ppcNovo,
-          'vigencia_datab': item['datab'],
-          'vigencia_datbi': item['datbi'],
+          'vigencia_datab': lista.datab ?? item['datab'],
+          'vigencia_datbi': lista.datbi ?? item['datbi'],
           'draft_id': draftId,
         });
       }
@@ -643,14 +883,17 @@ class DraftPricingService {
   List<Map<String, dynamic>> _montarSapItems(
     List items,
     Map<String, String> clusterMap,
-    List regras,
-  ) {
+    List regras, {
+    String? datab, // vigência da lista (AAAAMMDD); null = a do item
+    String? datbi,
+  }) {
     return items.map((item) {
       final matnr = item['product_id']?.toString() ?? '';
       double kbetr = _toDouble(item['new_price']) ?? 0.0;
 
+      _RegraMatch? melhor;
       if (regras.isNotEmpty) {
-        final melhor = _melhorRegra(
+        melhor = _melhorRegra(
           regras,
           productId: matnr,
           clusterId: clusterMap[matnr],
@@ -664,11 +907,32 @@ class DraftPricingService {
 
       // MXWRT (valor inferior) e GKWRT (valor superior) são os limites da
       // condição de preço no SAP (tela VK11). Editáveis manualmente por
-      // material (botão "Limites SAP" na tela de Preços) — quando não
-      // informados, vão como 0,00 puro para o SAP, sem nenhum fallback
-      // automático para o KBETR.
-      final mxwrt = _toDouble(item['mxwrt']) ?? 0.0;
-      final gkwrt = _toDouble(item['gkwrt']) ?? 0.0;
+      // material (botão "Limites SAP" na tela de Preços) — quando nenhum dos
+      // dois é informado, vão como 0,00 (sem limite). Informando só um, o
+      // outro assume o KBETR (ver abaixo).
+      //
+      // Os limites são calculados sobre o preço BASE do rascunho. Em lista
+      // filha com exceção de política, o KBETR recebe a regra (% ou valor
+      // fixo); os limites precisam receber a MESMA regra, senão o KBETR
+      // passa do GKWRT (ex.: KBETR 166,49 com GKWRT 157,50). Limite 0 (sem
+      // limite) continua 0.
+      double limite(dynamic v) {
+        final base = _toDouble(v) ?? 0.0;
+        if (base <= 0 || melhor == null) return base;
+        return double.parse(_aplicarRegra(melhor, base).toStringAsFixed(2));
+      }
+
+      var mxwrt = limite(item['mxwrt']);
+      var gkwrt = limite(item['gkwrt']);
+
+      // O SAP rejeita a condição com só um limite preenchido (VK023). Se o
+      // usuário informou apenas um lado, o outro assume o valor padrão: o
+      // próprio preço enviado (KBETR já com a exceção da lista).
+      if (mxwrt > 0 && gkwrt <= 0) {
+        gkwrt = kbetr;
+      } else if (gkwrt > 0 && mxwrt <= 0) {
+        mxwrt = kbetr;
+      }
 
       return {
         'MATNR': matnr,
@@ -676,8 +940,12 @@ class DraftPricingService {
         'KONWA': item['konwa']?.toString() ?? 'BRL',
         'KMEIN': item['kmein']?.toString() ?? 'KG',
         'KRECH': item['krech']?.toString() ?? 'C',
-        'DATAB': item['datab']?.toString() ?? '',
-        'DATBI': item['datbi']?.toString() ?? '',
+        'DATAB': (datab != null && datab.isNotEmpty)
+            ? datab
+            : (item['datab']?.toString() ?? ''),
+        'DATBI': (datbi != null && datbi.isNotEmpty)
+            ? datbi
+            : (item['datbi']?.toString() ?? ''),
         'MXWRT': mxwrt,
         'GKWRT': gkwrt,
         'STATUS': item['sap_status']?.toString() ?? '',
@@ -730,10 +998,15 @@ class DraftPricingService {
 
   Future<Map<String, String>> _clusterMapForProducts(List<String> codes) async {
     if (codes.isEmpty) return {};
-    final prodRes = await supabase
-        .from('products')
-        .select('code, pricing_cluster_id')
-        .inFilter('code', codes);
+    final prodRes = await emBlocos(
+      codes,
+      (parte) => paginar((a, b) => supabase
+          .from('products')
+          .select('code, pricing_cluster_id')
+          .inFilter('code', parte)
+          .order('code')
+          .range(a, b)),
+    );
 
     final map = <String, String>{};
     for (final row in prodRes as List) {

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:pole_price/controllers/preco_controller.dart';
 import 'package:pole_price/widgets/preco/seletor_targets.dart';
 
-const _laranja = Color(0xFFFF6B00);
+const _laranja = Color(0xFFE8793A);
 
 class SecaoListasDestino extends StatelessWidget {
   final PrecoController controller;

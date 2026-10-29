@@ -1,9 +1,9 @@
 // lib/screens/home_screen.dart
 
+import 'package:pole_price/controllers/preco_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:pole_price/controllers/permissao_controller.dart';
 import 'package:pole_price/models/permissao_model.dart';
-import 'package:pole_price/screens/login_page.dart';
 import 'package:pole_price/widgets/app_shell.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -256,12 +256,8 @@ class _HomeScreenState extends State<HomeScreen>
   Future<void> _sair() async {
     await _supabase.auth.signOut();
     PermissaoController.reset();
-    if (mounted) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const LoginPage()),
-      );
-    }
+    PrecoController.reset();
+    // O router redireciona para /login quando a sessão acaba.
   }
 
   String get _subtituloMetricaPendentes => switch (_perm.permissao?.role) {
@@ -298,7 +294,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   @override
   Widget build(BuildContext context) {
-    const corLaranja = Color(0xFFFF6B00);
+    const corLaranja = Color(0xFFE8793A);
     const corTextoPrincipal = Color(0xFF0F172A);
 
     return Scaffold(
@@ -789,7 +785,7 @@ class _HomeScreenState extends State<HomeScreen>
   // ── FEED DE PROCESSOS (Visual Timeline e Cards com Microinterações) ──
 
   Widget _bentoFeed() {
-    const corLaranja = Color(0xFFFF6B00);
+    const corLaranja = Color(0xFFE8793A);
 
     return Container(
       decoration: BoxDecoration(
@@ -1006,7 +1002,7 @@ class _HomeScreenState extends State<HomeScreen>
   // ── SEÇÃO DE ATALHOS / ACESSO RÁPIDO (Visual Cards Modernos) ──
 
   Widget _bentoAcessoRapido(List<Map<String, dynamic>> modulos) {
-    const corLaranja = Color(0xFFFF6B00);
+    const corLaranja = Color(0xFFE8793A);
 
     return Container(
       decoration: BoxDecoration(

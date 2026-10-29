@@ -87,7 +87,7 @@ class GrupoPicker extends StatefulWidget {
 }
 
 class _GrupoPickerState extends State<GrupoPicker> {
-  static const _laranja = Color(0xFFFF6B00);
+  static const _laranja = Color(0xFFE8793A);
   static const _slate900 = Color(0xFF0F172A);
   static const _slate600 = Color(0xFF475569);
   static const _slate200 = Color(0xFFE2E8F0);

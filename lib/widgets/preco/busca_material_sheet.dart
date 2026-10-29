@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:pole_price/controllers/preco_controller.dart';
 import 'package:pole_price/models/material_preco.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:pole_price/service/supabase_paginacao.dart';
+import 'package:pole_price/models/product_group_model.dart';
+import 'package:pole_price/service/product_group_service.dart';
 
-const _laranja = Color(0xFFFF6B00);
+const _laranja = Color(0xFFE8793A);
 
 /// Retorna a lista de [MaterialPreco] adicionados, ou null se cancelado.
 class BuscaMaterialSheet extends StatefulWidget {
@@ -23,14 +26,28 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
 
   // ── Estado modo material ──────────────────────────────────────────────────
   List<Map<String, dynamic>> _resultados = [];
+  // Mostra só os primeiros N resultados; _truncado avisa que há mais.
+  static const int _limiteBusca = 30;
+  bool _truncado = false;
+  // Descarta respostas de buscas antigas que chegam depois de uma mais nova
+  // (a busca roda a cada tecla digitada).
+  int _buscaSeq = 0;
 
   // ── Estado modo grupo ─────────────────────────────────────────────────────
   List<Map<String, dynamic>> _grupos = [];
   // clusterId → lista de produtos
   final Map<String, List<Map<String, dynamic>>> _materiaisPorGrupo = {};
+  // clusterId → total de produtos do cluster (antes de tirar os já adicionados)
+  final Map<String, int> _totalPorGrupo = {};
   // quais grupos estão expandidos
   final Set<String> _expandidos = {};
   bool _loadingGrupos = false;
+  // Hierarquia Categoria > Linha > Grupo > Cluster (cadastro de grupos)
+  List<ProductCategory> _hierarquia = [];
+  // Clusters que nao aparecem na hierarquia (sem grupo/linha/categoria)
+  List<Map<String, dynamic>> _clustersSemHierarquia = [];
+  // niveis da arvore expandidos ('cat:<id>', 'lin:<id>', 'grp:<id>', 'sem')
+  final Set<String> _nivelExpandido = {};
 
   // ── Compartilhado ─────────────────────────────────────────────────────────
   final Set<String> _selecionados = {};
@@ -58,36 +75,44 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
   // ── Busca modo material ───────────────────────────────────────────────────
 
   Future<void> _buscar(String q) async {
+    final seq = ++_buscaSeq;
     setState(() {
       _loading = true;
       _erro = null;
     });
 
     try {
-      final query = _supabase
-          .from('products')
-          .select('code, name, pricing_cluster_id')
-          .order('name')
-          .limit(30);
+      // Os já adicionados são descartados depois da consulta; sem folga no
+      // limite, eles consumiriam vagas e a lista viria com menos de N itens
+      // (ou vazia) mesmo havendo mais resultados.
+      final limite = (_limiteBusca + _jaAdicionados.length + 1).clamp(1, 1000);
 
-      final productsRes = q.trim().isEmpty
-          ? await query
+      // Caracteres que quebram o filtro .or() do PostgREST / curingas do ilike.
+      final termo = q.trim().replaceAll(RegExp(r'[,()%*\\]'), ' ').trim();
+
+      final productsRes = termo.isEmpty
+          ? await _supabase
+              .from('products')
+              .select('code, name, pricing_cluster_id')
+              .order('name')
+              .limit(limite)
           : await _supabase
               .from('products')
               .select('code, name, pricing_cluster_id')
-              .or('code.ilike.%$q%,name.ilike.%$q%')
+              .or('code.ilike.%$termo%,name.ilike.%$termo%')
               .order('name')
-              .limit(30);
+              .limit(limite);
 
       List<Map<String, dynamic>> resultados =
           List<Map<String, dynamic>>.from(productsRes as List);
+      final atingiuLimite = resultados.length >= limite;
 
-      if (resultados.isEmpty && q.trim().isNotEmpty) {
+      if (resultados.isEmpty && termo.isNotEmpty) {
         final itemsRes = await _supabase
             .from('price_list_items')
             .select('matnr')
-            .ilike('matnr', '%$q%')
-            .limit(30);
+            .ilike('matnr', '%$termo%')
+            .limit(limite);
 
         final matnrs = (itemsRes as List)
             .map((r) => r['matnr'].toString())
@@ -119,11 +144,17 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
       resultados.removeWhere(
           (p) => _jaAdicionados.contains(p['code']?.toString()));
 
-      setState(() => _resultados = resultados);
+      if (seq != _buscaSeq || !mounted) return; // chegou uma busca mais nova
+      final truncado = atingiuLimite && resultados.length > _limiteBusca;
+      setState(() {
+        _resultados = resultados.take(_limiteBusca).toList();
+        _truncado = truncado;
+      });
     } catch (e) {
+      if (seq != _buscaSeq || !mounted) return;
       setState(() => _erro = 'Erro ao buscar: $e');
     } finally {
-      setState(() => _loading = false);
+      if (seq == _buscaSeq && mounted) setState(() => _loading = false);
     }
   }
 
@@ -137,7 +168,22 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
           .from('pricing_clusters')
           .select('id, name')
           .order('name');
-      setState(() => _grupos = List<Map<String, dynamic>>.from(res as List));
+      final hierarquia = await ProductGroupService(_supabase).getHierarchy();
+
+      final todos = List<Map<String, dynamic>>.from(res as List);
+      final naHierarquia = <String>{
+        for (final cat in hierarquia)
+          for (final l in cat.lines)
+            for (final g in l.groups)
+              for (final cl in g.clusters) cl.id,
+      };
+      setState(() {
+        _grupos = todos;
+        _hierarquia = hierarquia;
+        _clustersSemHierarquia = todos
+            .where((c) => !naHierarquia.contains(c['id'].toString()))
+            .toList();
+      });
     } catch (e) {
       setState(() => _erro = 'Erro ao carregar grupos: $e');
     } finally {
@@ -166,11 +212,15 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
           .eq('pricing_cluster_id', clusterId)
           .order('name');
 
-      final materiais = List<Map<String, dynamic>>.from(res as List)
+      final todos = List<Map<String, dynamic>>.from(res as List);
+      final materiais = todos
           .where((p) => !_jaAdicionados.contains(p['code']?.toString()))
           .toList();
 
-      setState(() => _materiaisPorGrupo[clusterId] = materiais);
+      setState(() {
+        _totalPorGrupo[clusterId] = todos.length;
+        _materiaisPorGrupo[clusterId] = materiais;
+      });
     } catch (e) {
       setState(() {
         _erro = 'Erro ao carregar materiais do grupo: $e';
@@ -247,49 +297,37 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
           r['code'].toString(): r as Map<String, dynamic>
       };
 
-      // 'period' é texto e pode conter formatos legados fora do padrão
-      // AAAAMM — só considera períodos de 6 dígitos ao escolher o mais recente.
-      final periodRes = await _supabase.from('product_costs').select('period');
-      final periodoRegex = RegExp(r'^\d{6}$');
-      final latestPeriod = (periodRes as List)
-          .map((r) => r['period']?.toString())
-          .whereType<String>()
-          .where((p) => periodoRegex.hasMatch(p))
-          .fold<String?>(null, (max, p) => (max == null || p.compareTo(max) > 0) ? p : max);
-
-      Map<String, double> cpvMap = {};
-      Map<String, double> dedMap = {};
-      Map<String, double> dvMap = {};
-      if (latestPeriod != null) {
-        final cpvRows = await _supabase
-            .from('product_costs')
-            .select('product_code, cost_value, ded_pct, dv_pct')
-            .eq('period', latestPeriod)
-            .inFilter('product_code', codigosList);
-
-        for (final row in cpvRows as List) {
-          final code = row['product_code']?.toString();
-          if (code == null) continue;
-          final cost = (row['cost_value'] as num?)?.toDouble();
-          if (cost != null) cpvMap[code] = cost;
-          final ded = (row['ded_pct'] as num?)?.toDouble();
-          if (ded != null) dedMap[code] = ded;
-          final dv = (row['dv_pct'] as num?)?.toDouble();
-          if (dv != null) dvMap[code] = dv;
-        }
-      }
+      // Custo da semana atual ou, na falta dele, o último registrado.
+      final custos = await custosVigentes(_supabase, codigosList);
+      final cpvMap = <String, double>{
+        for (final e in custos.entries)
+          if (e.value.cpv != null) e.key: e.value.cpv!,
+      };
+      final dedMap = <String, double>{
+        for (final e in custos.entries)
+          if (e.value.dedPct != null) e.key: e.value.dedPct!,
+      };
+      final dvMap = <String, double>{
+        for (final e in custos.entries)
+          if (e.value.dvPct != null) e.key: e.value.dvPct!,
+      };
 
       // Vínculo de preço pai/filho + agrupamento + dimensionamento de caixa —
       // mesmos campos buscados em PriceService.getMaterials. Sem isso, um
       // material adicionado manualmente nunca calcula PPV/MC (faltando
       // margem/fator) nem participa do vínculo pai/filho do agrupamento.
-      final materialsRows = await _supabase
-          .from('materials')
-          .select(
-            'material_code, agrupamento_preco, material_pai_code, '
-            'excecao_preco_pct, peso_unidade, peso_caixa, unidade_venda',
-          )
-          .inFilter('material_code', codigosList);
+      final materialsRows = await emBlocos(
+        codigosList,
+        (parte) => paginar((a, b) => _supabase
+            .from('materials')
+            .select(
+              'material_code, agrupamento_preco, material_pai_code, '
+              'excecao_preco_pct, peso_unidade, peso_caixa, unidade_venda',
+            )
+            .inFilter('material_code', parte)
+            .order('material_code')
+            .range(a, b)),
+      );
 
       final Map<String, Map<String, dynamic>> materialsMap = {
         for (final r in materialsRows as List)
@@ -667,8 +705,19 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
 
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      itemCount: _resultados.length,
+      itemCount: _resultados.length + (_truncado ? 1 : 0),
       itemBuilder: (context, index) {
+        if (index == _resultados.length) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Center(
+              child: Text(
+                'Mostrando os primeiros $_limiteBusca — digite para refinar a busca',
+                style: TextStyle(fontSize: 11.5, color: Colors.grey.shade500),
+              ),
+            ),
+          );
+        }
         final p = _resultados[index];
         final code = p['code']?.toString() ?? '';
         final name = p['name']?.toString() ?? '';
@@ -696,13 +745,141 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
       );
     }
 
-    return ListView.builder(
+    final categorias = _hierarquia
+        .where((c) => c.lines.any((l) => l.groups.any((g) => g.clusters.isNotEmpty)))
+        .toList();
+
+    return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      itemCount: _grupos.length,
-      itemBuilder: (context, index) {
-        final grupo = _grupos[index];
-        final clusterId = grupo['id'].toString();
-        final nome = grupo['name']?.toString() ?? clusterId;
+      children: [
+        for (final cat in categorias) ..._buildCategoria(cat),
+        if (_clustersSemHierarquia.isNotEmpty) ..._buildSemHierarquia(),
+      ],
+    );
+  }
+
+  // ── Árvore: Categoria → Linha → Grupo → Cluster ───────────────────────────
+
+  void _toggleNivel(String chave) => setState(() {
+        if (!_nivelExpandido.remove(chave)) _nivelExpandido.add(chave);
+      });
+
+  Widget _nivelHeader({
+    required String chave,
+    required String label,
+    required int nivel, // 0 categoria, 1 linha, 2 grupo
+    required int qtdClusters,
+  }) {
+    final aberto = _nivelExpandido.contains(chave);
+    const icones = [
+      Icons.category_outlined,
+      Icons.linear_scale_rounded,
+      Icons.folder_outlined,
+    ];
+    return InkWell(
+      onTap: () => _toggleNivel(chave),
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        margin: EdgeInsets.only(left: nivel * 14.0, top: 2, bottom: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: nivel == 0 ? const Color(0xFFF3F3F3) : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            AnimatedRotation(
+              turns: aberto ? 0.25 : 0,
+              duration: const Duration(milliseconds: 150),
+              child: const Icon(Icons.chevron_right,
+                  size: 16, color: Color(0xFF9E9E9E)),
+            ),
+            const SizedBox(width: 6),
+            Icon(icones[nivel.clamp(0, 2)], size: 14, color: _laranja),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: nivel == 0 ? 13 : 12.5,
+                  fontWeight: nivel == 0 ? FontWeight.w700 : FontWeight.w600,
+                  color: const Color(0xFF424242),
+                ),
+              ),
+            ),
+            Text(
+              '$qtdClusters ${qtdClusters == 1 ? 'cluster' : 'clusters'}',
+              style: TextStyle(fontSize: 10.5, color: Colors.grey.shade500),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildCategoria(ProductCategory cat) {
+    final linhas = cat.lines
+        .where((l) => l.groups.any((g) => g.clusters.isNotEmpty))
+        .toList();
+    final chave = 'cat:${cat.id}';
+    final qtd = linhas.fold<int>(
+        0, (t, l) => t + l.groups.fold<int>(0, (u, g) => u + g.clusters.length));
+    return [
+      _nivelHeader(chave: chave, label: cat.name, nivel: 0, qtdClusters: qtd),
+      if (_nivelExpandido.contains(chave))
+        for (final lin in linhas) ..._buildLinha(lin),
+    ];
+  }
+
+  List<Widget> _buildLinha(ProductLine lin) {
+    final grupos = lin.groups.where((g) => g.clusters.isNotEmpty).toList();
+    final chave = 'lin:${lin.id}';
+    final qtd = grupos.fold<int>(0, (t, g) => t + g.clusters.length);
+    return [
+      _nivelHeader(chave: chave, label: lin.name, nivel: 1, qtdClusters: qtd),
+      if (_nivelExpandido.contains(chave))
+        for (final grp in grupos) ..._buildGrupoNivel(grp),
+    ];
+  }
+
+  List<Widget> _buildGrupoNivel(ProductGroup grp) {
+    final chave = 'grp:${grp.id}';
+    return [
+      _nivelHeader(
+          chave: chave,
+          label: grp.name,
+          nivel: 2,
+          qtdClusters: grp.clusters.length),
+      if (_nivelExpandido.contains(chave))
+        for (final cl in grp.clusters)
+          Padding(
+            padding: const EdgeInsets.only(left: 42),
+            child: _buildClusterTile(cl.id, cl.name),
+          ),
+    ];
+  }
+
+  List<Widget> _buildSemHierarquia() {
+    const chave = 'sem';
+    return [
+      _nivelHeader(
+          chave: chave,
+          label: 'Sem hierarquia definida',
+          nivel: 0,
+          qtdClusters: _clustersSemHierarquia.length),
+      if (_nivelExpandido.contains(chave))
+        for (final c in _clustersSemHierarquia)
+          Padding(
+            padding: const EdgeInsets.only(left: 14),
+            child: _buildClusterTile(
+                c['id'].toString(), c['name']?.toString() ?? c['id'].toString()),
+          ),
+    ];
+  }
+
+  // ── Cluster (checkbox + lista de produtos) ────────────────────────────────
+
+  Widget _buildClusterTile(String clusterId, String nome) {
         final expandido = _expandidos.contains(clusterId);
         final materiais = _materiaisPorGrupo[clusterId];
         final todosMarcado = _grupoTodosMarcado(clusterId);
@@ -842,7 +1019,10 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
               else if (materiais.isEmpty)
                 Padding(
                   padding: const EdgeInsets.only(left: 40, top: 4, bottom: 4),
-                  child: Text('Nenhum material disponível',
+                  child: Text(
+                      (_totalPorGrupo[clusterId] ?? 0) > 0
+                          ? 'Todos os ${_totalPorGrupo[clusterId]} materiais deste cluster já estão na lista'
+                          : 'Este cluster não tem materiais cadastrados',
                       style: TextStyle(
                           fontSize: 12, color: Colors.grey.shade400)),
                 )
@@ -866,8 +1046,6 @@ class _BuscaMaterialSheetState extends State<BuscaMaterialSheet> {
             ],
           ],
         );
-      },
-    );
   }
 
   // ── Tile de material (compartilhado) ──────────────────────────────────────

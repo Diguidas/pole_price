@@ -4,7 +4,7 @@ import 'package:pole_price/models/material_preco.dart';
 import 'package:pole_price/models/pricing_cluster_item.dart';
 import 'package:pole_price/models/regra_ajuste.dart';
 
-const _laranja = Color(0xFFFF6B00);
+const _laranja = Color(0xFFE8793A);
 
 class SecaoExcecoes extends StatefulWidget {
   final PrecoController controller;

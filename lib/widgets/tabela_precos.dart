@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:pole_price/controllers/preco_controller.dart';
 import 'package:pole_price/models/material_preco.dart';
+import 'package:pole_price/models/pricelist_model.dart';
 
-const _laranja = Color(0xFFFF6B00);
+const _laranja = Color(0xFFE8793A);
 const _azulInfo = Color(0xFF0EA5E9);
 
 // ── Paleta das seções ────────────────────────────────────────────────────────
@@ -12,7 +13,7 @@ const _corAtualLabel = Color(0xFF3B82F6);
 
 const _corNovoBg = Color(0xFFFFF8F2);
 const _corNovoBorda = Color(0xFFFFCCA0);
-const _corNovoLabel = Color(0xFFFF6B00);
+const _corNovoLabel = Color(0xFFE8793A);
 
 const _corOfertaBg = Color(0xFFF0FDF6);
 const _corOfertaBorda = Color(0xFF86EFAC);
@@ -215,6 +216,13 @@ class _TabelaPrecosState extends State<TabelaPrecos> {
               ),
             ),
             const Spacer(),
+            if (ctrl.targets.isNotEmpty)
+              TextButton.icon(
+                onPressed: () => _definirListasSelecionados(lista),
+                icon: const Icon(Icons.account_tree_outlined, size: 16),
+                label: const Text('Definir listas'),
+                style: TextButton.styleFrom(foregroundColor: _laranja),
+              ),
             TextButton.icon(
               onPressed: () => _confirmarExclusao(lista),
               icon: const Icon(Icons.delete_outline, size: 16),
@@ -225,6 +233,30 @@ class _TabelaPrecosState extends State<TabelaPrecos> {
         ],
       ),
     );
+  }
+
+  /// Define, para os materiais selecionados, quais listas filhas os recebem.
+  Future<void> _definirListasSelecionados(List<MaterialPreco> lista) async {
+    final alvos = lista.where((m) => _selecionados.contains(m.codigo)).toList();
+    if (alvos.isEmpty) return;
+    // Parte do que os selecionados já têm em comum (se forem todos iguais).
+    final primeira = alvos.first.listasExcluidas;
+    final iguais = alvos.every(
+      (m) =>
+          m.listasExcluidas.length == primeira.length &&
+          m.listasExcluidas.containsAll(primeira),
+    );
+    final r = await showDialog<Set<String>>(
+      context: context,
+      builder: (_) => _ListasMaterialDialog(
+        titulo: '${alvos.length} material(is) selecionado(s)',
+        listas: ctrl.listasDestino,
+        excluidasIniciais: iguais ? primeira : const <String>{},
+      ),
+    );
+    if (r == null) return;
+    ctrl.definirListasExcluidas(alvos, r);
+    setState(() {});
   }
 
   Future<void> _confirmarExclusao(List<MaterialPreco> lista) async {
@@ -645,6 +677,69 @@ class _ItemMaterialState extends State<_ItemMaterial> {
 
   // ── Limites SAP (MXWRT/GKWRT) ────────────────────────────────────────────
 
+  /// Chip "Filhas: todas / 2 de 5" — abre a escolha das listas que recebem
+  /// este material. A lista mãe sempre recebe.
+  Widget _chipListas() {
+    final destinos = widget.controller.targets;
+    final fora = m.listasExcluidas.where(destinos.contains).length;
+    final todas = fora == 0;
+    return Padding(
+      padding: const EdgeInsets.only(left: 8),
+      child: Tooltip(
+        message: 'Listas que recebem este material (a lista mãe sempre recebe)',
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: _abrirListasDestino,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+            decoration: BoxDecoration(
+              color: todas ? Colors.grey.shade50 : _laranja.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: todas ? Colors.grey.shade300 : _laranja.withOpacity(0.5),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.account_tree_outlined,
+                  size: 13,
+                  color: todas ? Colors.grey.shade500 : _laranja,
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  todas
+                      ? 'Filhas: todas'
+                      : 'Filhas: ${destinos.length - fora} de ${destinos.length}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: todas ? Colors.grey.shade600 : _laranja,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _abrirListasDestino() async {
+    final r = await showDialog<Set<String>>(
+      context: context,
+      builder: (_) => _ListasMaterialDialog(
+        titulo: m.description.isNotEmpty ? m.description : m.codigo,
+        listas: widget.controller.listasDestino,
+        excluidasIniciais: m.listasExcluidas,
+      ),
+    );
+    if (r == null) return;
+    widget.controller.definirListasExcluidas([m], r);
+    widget.onChanged();
+  }
+
   Future<void> _abrirLimitesSap() async {
     final resultado = await showDialog<_LimitesSap>(
       context: context,
@@ -967,6 +1062,7 @@ class _ItemMaterialState extends State<_ItemMaterial> {
                   style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
                 ),
               ),
+            if (widget.controller.targets.isNotEmpty) _chipListas(),
             IconButton(
               icon: Icon(
                 Icons.rule_rounded,
@@ -1675,15 +1771,8 @@ class _LimitesSapDialogState extends State<_LimitesSapDialog> {
 
     final inferior = resolver(_inferiorCtrl.text, true);
     final superior = resolver(_superiorCtrl.text, false);
-    // Os dois limites viram MXWRT/GKWRT no VK11 e o SAP rejeita a condição
-    // quando só um deles está preenchido (mensagem VK023) — por isso não
-    // deixamos confirmar com só um dos dois valores informado.
-    if ((inferior == null) != (superior == null)) {
-      setState(() {
-        _erro = 'Preencha os dois limites (inferior e superior) ou deixe os dois em branco.';
-      });
-      return;
-    }
+    // Pode informar só um lado: no envio ao SAP o outro assume o próprio
+    // preço (o VK11 exige os dois preenchidos).
     Navigator.of(context).pop(_LimitesSap(inferior: inferior, superior: superior));
   }
 
@@ -1758,7 +1847,7 @@ class _LimitesSapDialogState extends State<_LimitesSapDialog> {
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               decoration: InputDecoration(
                 labelText: labelInferior,
-                hintText: 'Vazio = 0,00',
+                hintText: 'Vazio = igual ao preço',
                 helperText: eqInferior,
                 border: const OutlineInputBorder(),
               ),
@@ -1770,7 +1859,7 @@ class _LimitesSapDialogState extends State<_LimitesSapDialog> {
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               decoration: InputDecoration(
                 labelText: labelSuperior,
-                hintText: 'Vazio = 0,00',
+                hintText: 'Vazio = igual ao preço',
                 helperText: eqSuperior,
                 border: const OutlineInputBorder(),
               ),
@@ -1779,7 +1868,7 @@ class _LimitesSapDialogState extends State<_LimitesSapDialog> {
             const SizedBox(height: 8),
             Text(
               'Se deixar os dois em branco, nenhum limite é enviado. '
-              'Se preencher um, o outro também precisa ser preenchido.',
+              'Se preencher só um, o outro é igual ao preço enviado.',
               style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
             ),
             if (_erro != null) ...[
@@ -1801,6 +1890,120 @@ class _LimitesSapDialogState extends State<_LimitesSapDialog> {
           onPressed: _confirmar,
           style: FilledButton.styleFrom(backgroundColor: _laranja),
           child: const Text('Confirmar'),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Diálogo: quais listas filhas recebem o(s) material(is)
+// ─────────────────────────────────────────────────────────────────────────────
+class _ListasMaterialDialog extends StatefulWidget {
+  final String titulo;
+  final List<PriceList> listas; // listas filhas (destinos da política)
+  final Set<String> excluidasIniciais;
+
+  const _ListasMaterialDialog({
+    required this.titulo,
+    required this.listas,
+    required this.excluidasIniciais,
+  });
+
+  @override
+  State<_ListasMaterialDialog> createState() => _ListasMaterialDialogState();
+}
+
+class _ListasMaterialDialogState extends State<_ListasMaterialDialog> {
+  // Listas que RECEBEM o material (marcadas).
+  late final Set<String> _recebe = {
+    for (final l in widget.listas)
+      if (!widget.excluidasIniciais.contains(l.id)) l.id,
+  };
+
+  bool get _todas => _recebe.length == widget.listas.length;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Listas que recebem o material',
+          style: TextStyle(fontSize: 16)),
+      content: SizedBox(
+        width: 380,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.titulo,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'A lista mãe sempre recebe o material.',
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+            ),
+            const SizedBox(height: 8),
+            CheckboxListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              activeColor: _laranja,
+              value: _todas,
+              onChanged: (v) => setState(() {
+                _recebe.clear();
+                if (v ?? false) _recebe.addAll(widget.listas.map((l) => l.id));
+              }),
+              title: const Text('Todas as listas filhas',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+            ),
+            const Divider(height: 1),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 320),
+              child: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    for (final l in widget.listas)
+                      CheckboxListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        activeColor: _laranja,
+                        value: _recebe.contains(l.id),
+                        onChanged: (v) => setState(() {
+                          if (v ?? false) {
+                            _recebe.add(l.id);
+                          } else {
+                            _recebe.remove(l.id);
+                          }
+                        }),
+                        title: Text(l.description,
+                            style: const TextStyle(fontSize: 13)),
+                        subtitle: Text(l.id,
+                            style: TextStyle(
+                                fontSize: 11, color: Colors.grey.shade500)),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop({
+            for (final l in widget.listas)
+              if (!_recebe.contains(l.id)) l.id,
+          }),
+          style: FilledButton.styleFrom(backgroundColor: _laranja),
+          child: const Text('Aplicar'),
         ),
       ],
     );

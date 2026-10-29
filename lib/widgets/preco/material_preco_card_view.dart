@@ -10,7 +10,7 @@ const _corAtualLabel = Color(0xFF3B82F6);
 
 const _corNovoBg = Color(0xFFFFF8F2);
 const _corNovoBorda = Color(0xFFFFCCA0);
-const _corNovoLabel = Color(0xFFFF6B00);
+const _corNovoLabel = Color(0xFFE8793A);
 
 const _corOfertaBg = Color(0xFFF0FDF6);
 const _corOfertaBorda = Color(0xFF86EFAC);

@@ -2,11 +2,11 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
-final primaryColor = const Color(0xFFFF6B00);
+final primaryColor = const Color(0xFFE8793A);
 
 ThemeData appTheme = ThemeData(
   primaryColor: primaryColor,
-  scaffoldBackgroundColor: const Color(0xFFF5F6F8),
+  scaffoldBackgroundColor: const Color(0xFFF7F5F2),
 
   inputDecorationTheme: InputDecorationTheme(
     filled: true,

@@ -18,7 +18,7 @@ Widget _topBar() {
 
         ElevatedButton(
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFFFF6B00),
+            backgroundColor: const Color(0xFFE8793A),
           ),
           onPressed: controller.selecionada == null
               ? null

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:pole_price/controllers/preco_controller.dart';
 import 'package:pole_price/models/material_preco.dart';
 
-const _laranja = Color(0xFFFF6B00);
+const _laranja = Color(0xFFE8793A);
 
 // ── Botão "Limites SAP" (geral, por agrupamento) ──────────────────────────────
 class LimitesSapAgrupamentoButton extends StatelessWidget {
@@ -103,12 +103,6 @@ class _LimitesSapAgrupamentoDialogState
     if (agrupamento == null) return;
     final menos = _parse(_menosCtrl.text);
     final mais = _parse(_maisCtrl.text);
-    if ((menos == null) != (mais == null)) {
-      setState(() {
-        _erro = 'Preencha os dois (para baixo e para cima) ou deixe os dois em branco.';
-      });
-      return;
-    }
     widget.controller.aplicarLimitesPorAgrupamento({
       agrupamento: (menos: menos, mais: mais),
     });
@@ -172,7 +166,7 @@ class _LimitesSapAgrupamentoDialogState
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       decoration: const InputDecoration(
                         labelText: '% para baixo',
-                        hintText: 'Vazio = 0,00',
+                        hintText: 'Vazio = igual ao preço',
                         border: OutlineInputBorder(),
                       ),
                     ),
@@ -184,7 +178,7 @@ class _LimitesSapAgrupamentoDialogState
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       decoration: const InputDecoration(
                         labelText: '% para cima',
-                        hintText: 'Vazio = 0,00',
+                        hintText: 'Vazio = igual ao preço',
                         border: OutlineInputBorder(),
                       ),
                     ),
@@ -194,7 +188,8 @@ class _LimitesSapAgrupamentoDialogState
               const SizedBox(height: 8),
               Text(
                 'Aplicado sobre o PPV CX de cada material do agrupamento, gerando o '
-                'MXWRT/GKWRT (VK11). Se deixar os dois em branco, o limite é removido. '
+                'MXWRT/GKWRT (VK11). Pode preencher só um lado: o outro fica igual ao preço. '
+                'Se deixar os dois em branco, o limite é removido. '
                 'Materiais travados manualmente (ícone na linha da tabela) não são afetados.',
                 style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
               ),

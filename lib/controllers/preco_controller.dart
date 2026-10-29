@@ -9,6 +9,8 @@ import 'package:pole_price/service/preco_service.dart';
 import 'package:pole_price/service/pricing_policy_service.dart';
 import 'package:pole_price/service/sap_sync_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:pole_price/service/supabase_paginacao.dart';
+import 'package:pole_price/utils/semana_custo.dart';
 
 enum SapModo { lista, grupo }
 
@@ -41,6 +43,40 @@ class PrecoController extends ChangeNotifier {
 
   final PriceService service;
   final PricingPolicyService pricingPolicyService;
+
+  // ── Alerta de custos semanais desatualizados ─────────────────────────
+  /// Semana (AAAASS) do último custo importado; null = nenhum importado.
+  String? periodoCustosRecente;
+  bool custosStatusCarregado = false;
+
+  /// Mensagem de alerta quando a semana atual ainda não tem custos
+  /// importados; null quando está em dia (ou ainda não carregou).
+  String? get alertaCustosAtrasados {
+    if (!custosStatusCarregado) return null;
+    final atual = SemanaCusto.atual();
+    final ultimo = periodoCustosRecente;
+    if (ultimo == null) {
+      return 'Nenhum custo semanal importado. Importe a planilha de custos '
+          'da semana ${SemanaCusto.rotulo(atual)} antes de precificar.';
+    }
+    final atraso = SemanaCusto.semanasDeAtraso(ultimo);
+    if (atraso <= 0) return null;
+    return 'Custos desatualizados: o último registro é da semana '
+        '${SemanaCusto.rotulo(ultimo)} '
+        '($atraso ${atraso == 1 ? 'semana' : 'semanas'} de atraso; semana atual '
+        '${SemanaCusto.rotulo(atual)}). O CPV usado é o último registrado de '
+        'cada material.';
+  }
+
+  Future<void> carregarStatusCustos() async {
+    try {
+      periodoCustosRecente = await ultimoPeriodoCustos(service.supabase);
+      custosStatusCarregado = true;
+    } catch (_) {
+      custosStatusCarregado = false; // sem alerta se a consulta falhar
+    }
+    notifyListeners();
+  }
 
   // ── Estado principal ─────────────────────────────────────────────────
   List<PriceList> listas = [];
@@ -135,26 +171,50 @@ class PrecoController extends ChangeNotifier {
     return resultado;
   }
 
-  /// Localiza o pai da família de vínculo à qual [m] pertence: o próprio
-  /// [m] se ele é pai de filhos cadastrados, ou o material que ele segue
-  /// quando é filho. Não exige `agrupamento_preco` em nenhum dos lados —
-  /// basta o filho apontar `materialPaiCode` + `excecaoPrecoPct`.
-  MaterialPreco? _localizarPai(MaterialPreco m) {
-    if (m.materialPaiCode != null) {
-      for (final outro in materiais) {
-        if (outro.codigo == m.materialPaiCode) return outro;
-      }
-      return null;
+  // ── Listas que recebem cada material ──────────────────────────────────
+
+  /// Listas filhas (destinos) da política, com nome — para o seletor por
+  /// material. A lista mãe não entra: ela sempre recebe todos os materiais.
+  List<PriceList> get listasDestino => [
+    for (final id in targets)
+      listas.where((l) => l.id == id).firstOrNull ??
+          PriceList(id: id, description: id),
+  ];
+
+  /// Define, para cada material de [ms], as listas filhas que NÃO o recebem.
+  void definirListasExcluidas(
+    Iterable<MaterialPreco> ms,
+    Set<String> excluidas,
+  ) {
+    for (final m in ms) {
+      m.listasExcluidas
+        ..clear()
+        ..addAll(excluidas);
     }
-    if (_filhosDe(m).isNotEmpty) return m;
+    notifyListeners();
+  }
+
+  // ── Vínculo por agrupamento ───────────────────────────────────────────
+  // Todo material do mesmo `agrupamentoPreco` forma uma família: mexer no PPC
+  // (ou PPV/reajuste) de um propaga para os demais, que recalculam o PPV pela
+  // fórmula normal. Quando há pai/filho cadastrado (`materialPaiCode` +
+  // `excecaoPrecoPct`), o % de exceção continua valendo; quem não tem
+  // exceção cadastrada entra na família com exceção 0% (mesmo PPV do pai).
+
+  /// % de exceção efetivo: o cadastrado ou 0 (amarração padrão do grupo).
+  double _excecaoEfetiva(MaterialPreco m) => m.excecaoPrecoPct ?? 0.0;
+
+  /// Pai cadastrado de [m] (filho com exceção configurada), se estiver na lista.
+  MaterialPreco? _paiExplicito(MaterialPreco m) {
+    if (m.materialPaiCode == null || m.excecaoPrecoPct == null) return null;
+    for (final outro in materiais) {
+      if (outro.codigo == m.materialPaiCode) return outro;
+    }
     return null;
   }
 
-  /// Filhos diretos de [pai] dentro do mesmo agrupamento (com % de exceção
-  /// configurado — sem isso não há vínculo de fato). Basta o filho apontar
-  /// para o código do pai — não exige que o cadastro do pai também tenha
-  /// `agrupamento_preco` preenchido (ver nota em `_localizarPai`).
-  List<MaterialPreco> _filhosDe(MaterialPreco pai) => materiais
+  /// Filhos com pai + exceção cadastrados apontando para [pai].
+  List<MaterialPreco> _filhosExplicitos(MaterialPreco pai) => materiais
       .where(
         (m) =>
             m.codigo != pai.codigo &&
@@ -163,12 +223,64 @@ class PrecoController extends ChangeNotifier {
       )
       .toList();
 
-  /// `true` se [m] participa de um vínculo pai/filho (é filho com exceção
-  /// configurada, ou é pai de algum filho). Materiais fora de um vínculo
-  /// seguem a fórmula normal (PPC ⇄ PPV via margem), sem essa restrição.
+  /// Primeiro pai cadastrado (com filhos explícitos) do agrupamento [agr].
+  MaterialPreco? _raizExplicita(String agr) {
+    for (final m in materiais) {
+      if (m.removido || m.agrupamentoPreco != agr) continue;
+      if (_filhosExplicitos(m).isNotEmpty) return m;
+    }
+    return null;
+  }
+
+  /// Membros do agrupamento [agr] sem vínculo cadastrado (nem pai, nem filho),
+  /// exceto [excluir]. Entram na família com exceção 0%.
+  List<MaterialPreco> _membrosLivres(String agr, MaterialPreco excluir) =>
+      materiais
+          .where(
+            (m) =>
+                !m.removido &&
+                m.agrupamentoPreco == agr &&
+                m.codigo != excluir.codigo &&
+                _paiExplicito(m) == null &&
+                _filhosExplicitos(m).isEmpty,
+          )
+          .toList();
+
+  /// Localiza a referência (pai) da família à qual [m] pertence:
+  /// 1. o pai cadastrado de [m], se for filho com exceção;
+  /// 2. o próprio [m], se for pai de filhos cadastrados;
+  /// 3. se [m] não tem vínculo cadastrado: o pai cadastrado do agrupamento,
+  ///    se houver; senão o próprio [m] vira a referência do grupo.
+  /// Devolve null se [m] não tem agrupamento ou está sozinho nele.
+  MaterialPreco? _localizarPai(MaterialPreco m) {
+    final explicito = _paiExplicito(m);
+    if (explicito != null) return explicito;
+    if (_filhosExplicitos(m).isNotEmpty) return m;
+    final agr = m.agrupamentoPreco;
+    if (agr == null || m.removido) return null;
+    final raiz = _raizExplicita(agr);
+    if (raiz != null) return raiz;
+    return _membrosLivres(agr, m).isNotEmpty ? m : null;
+  }
+
+  /// Filhos de [pai]: os cadastrados (com sua exceção) + os demais membros
+  /// livres do agrupamento (exceção 0%). Se o agrupamento já tem outro pai
+  /// cadastrado, os livres seguem aquele e não [pai].
+  List<MaterialPreco> _filhosDe(MaterialPreco pai) {
+    final filhos = _filhosExplicitos(pai);
+    final agr = pai.agrupamentoPreco;
+    if (agr == null || pai.removido) return filhos;
+    final raiz = _raizExplicita(agr);
+    if (raiz != null && raiz.codigo != pai.codigo) return filhos;
+    return [...filhos, ..._membrosLivres(agr, pai)];
+  }
+
+  /// `true` se [m] participa de uma família (do agrupamento ou de um
+  /// pai/filho cadastrado). Materiais sozinhos no agrupamento seguem a fórmula
+  /// normal (PPC ⇄ PPV via margem), sem essa restrição.
   bool estaVinculado(MaterialPreco m) {
-    if (m.materialPaiCode != null && m.excecaoPrecoPct != null) return true;
-    return _filhosDe(m).isNotEmpty;
+    final pai = _localizarPai(m);
+    return pai != null && _filhosDe(pai).isNotEmpty;
   }
 
   /// Zera todos os campos editáveis da família vinculada (PPC, PPV, reajuste).
@@ -265,8 +377,8 @@ class PrecoController extends ChangeNotifier {
 
     if (!pai.ppvUnitNovoLimpo) {
       if (filhoEhFontePpv) {
-        final pct = editado.excecaoPrecoPct;
-        if (pct != null && pct != -1) {
+        final pct = _excecaoEfetiva(editado);
+        if (pct != -1) {
           pai.ppvUnitNovoOverride = editado.ppvUnitNovoOverride! / (1 + pct);
           pai.ppvUnitNovoLimpo = false;
         }
@@ -283,7 +395,7 @@ class PrecoController extends ChangeNotifier {
       if (filho.codigo == editado.codigo) {
         if (!filhoEhFontePpv && !filho.ppvUnitNovoLimpo) {
           filho.ppvUnitNovoOverride = paiPpv != null
-              ? paiPpv * (1 + filho.excecaoPrecoPct!)
+              ? paiPpv * (1 + _excecaoEfetiva(filho))
               : null;
           if (filho.ppvUnitNovoOverride != null) {
             filho.ppvUnitNovoLimpo = false;
@@ -293,7 +405,7 @@ class PrecoController extends ChangeNotifier {
       }
       if (filho.ppvUnitNovoLimpo) continue;
       filho.ppvUnitNovoOverride = paiPpv != null
-          ? paiPpv * (1 + filho.excecaoPrecoPct!)
+          ? paiPpv * (1 + _excecaoEfetiva(filho))
           : null;
       if (filho.ppvUnitNovoOverride != null) {
         filho.ppvUnitNovoLimpo = false;
@@ -883,11 +995,16 @@ class PrecoController extends ChangeNotifier {
 
       final Map<String, String> descMap = {};
       if (codigos.isNotEmpty && pltyp != null) {
-        final matsRes = await service.supabase
-            .from('materials')
-            .select('product_id, description')
-            .eq('price_list_id', pltyp!)
-            .inFilter('product_id', codigos);
+        final matsRes = await emBlocos(
+          codigos,
+          (parte) => paginar((a, b) => service.supabase
+              .from('materials')
+              .select('product_id, description')
+              .eq('price_list_id', pltyp!)
+              .inFilter('product_id', parte)
+              .order('id')
+              .range(a, b)),
+        );
         for (final m in matsRes as List) {
           descMap[m['product_id'].toString()] =
               m['description']?.toString() ?? '';
@@ -895,10 +1012,15 @@ class PrecoController extends ChangeNotifier {
         // Fallback para products.name se não encontrou em materials
         final semDesc = codigos.where((c) => !descMap.containsKey(c)).toList();
         if (semDesc.isNotEmpty) {
-          final prodRes = await service.supabase
-              .from('products')
-              .select('code, name')
-              .inFilter('code', semDesc);
+          final prodRes = await emBlocos(
+            semDesc,
+            (parte) => paginar((a, b) => service.supabase
+                .from('products')
+                .select('code, name')
+                .inFilter('code', parte)
+                .order('code')
+                .range(a, b)),
+          );
           for (final p in prodRes as List) {
             descMap[p['code'].toString()] = p['name']?.toString() ?? '';
           }
@@ -909,12 +1031,17 @@ class PrecoController extends ChangeNotifier {
       // (tabela materials, coluna material_code), não da lista.
       final Map<String, Map<String, dynamic>> vinculoMap = {};
       if (codigos.isNotEmpty) {
-        final vinculoRes = await service.supabase
-            .from('materials')
-            .select(
-              'material_code, agrupamento_preco, material_pai_code, excecao_preco_pct',
-            )
-            .inFilter('material_code', codigos);
+        final vinculoRes = await emBlocos(
+          codigos,
+          (parte) => paginar((a, b) => service.supabase
+              .from('materials')
+              .select(
+                'material_code, agrupamento_preco, material_pai_code, excecao_preco_pct',
+              )
+              .inFilter('material_code', parte)
+              .order('material_code')
+              .range(a, b)),
+        );
         for (final r in vinculoRes as List) {
           final code = r['material_code']?.toString();
           if (code != null) vinculoMap[code] = r;
@@ -1036,6 +1163,18 @@ class PrecoController extends ChangeNotifier {
               ),
             )
             .toList();
+      } catch (_) {}
+
+      // Listas filhas que NÃO recebem cada material (se houver exclusões).
+      try {
+        final exclusoes = await service.draftPricing.carregarExclusoes(draftId);
+        for (final entry in exclusoes.entries) {
+          for (final m in materiais) {
+            if (entry.value.contains(m.codigo)) {
+              m.listasExcluidas.add(entry.key);
+            }
+          }
+        }
       } catch (_) {}
 
       filtrados = List.from(materiais);
